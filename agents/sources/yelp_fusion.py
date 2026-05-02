@@ -136,6 +136,13 @@ def source_leads(
 
     Yelp accepts `location` as a free-form string ("Orlando, FL"), so unlike
     the Azure adapter there is no separate geocode step.
+
+    Cost / latency envelope:
+        Worst case = (number of terms in rotation) * ceil(count / 50) Yelp API calls.
+        For "kitchen remodelers" niche this is 4 terms; at count=200 that's 4 * 4 =
+        up to 16 calls, paced at 1.0 qps = ~16s wall time. Free-tier daily quota is
+        5000 calls — a 50-city campaign at count=200 per city would consume ~16% of
+        daily quota. Document this ceiling in any router that loops over cities.
     """
     location = f"{city}, {state}"
     categories = _categories_for(niche)
@@ -166,9 +173,10 @@ def source_leads(
                 # (term, offset) and continue — CLAUDE.md: external failures
                 # get caught + logged, our bugs crash. Anything that isn't a
                 # requests-layer error is allowed to propagate.
+                status = getattr(getattr(e, "response", None), "status_code", "?")
                 print(
                     f"[yelp_fusion source] WARN: term={term!r} offset={offset} "
-                    f"failed: {e}"
+                    f"failed: {type(e).__name__} status={status} {e}"
                 )
                 break
 

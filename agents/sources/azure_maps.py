@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import requests
+
 from tools import AzureMapsClient
 
 
@@ -117,10 +119,14 @@ def source_leads(
                 limit=100,
                 category_set=None,
             )
-        except Exception:
+        except (requests.HTTPError, requests.Timeout, requests.ConnectionError) as e:
             # External-API errors are expected churn (throttle, transient
-            # 5xx that exhausted retries). Skip the keyword and continue —
-            # CLAUDE.md: external failures get caught + logged, our bugs crash.
+            # 5xx that exhausted retries, network blips). Skip the keyword
+            # and continue — CLAUDE.md: external failures get caught + logged,
+            # our bugs crash. Anything that isn't a requests-layer error
+            # (KeyError from a refactor in _normalize_poi, AttributeError
+            # from interface drift, etc.) is allowed to propagate.
+            print(f"[azure_maps source] WARN: keyword query {kw!r} failed: {e}")
             continue
 
         for poi in raw_results:

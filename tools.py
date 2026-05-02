@@ -89,6 +89,12 @@ class AzureMapsClient:
     Mitigations honored (see docs/plan-tightening-v1.md, Mitigation Stack):
     - 10: token-bucket rate limiter at `rate_limit_qps` plus random jitter.
     - 13: exponential back-off on 429/5xx with cap.
+
+    Not thread-safe; construct a separate instance per worker thread. The
+    `_last_call_ts` token-bucket state and the underlying `requests.Session`
+    are unguarded — sharing across `ThreadPoolExecutor` workers would race
+    the rate limiter and could corrupt the session's connection pool. Same
+    rule as the Anthropic client per CLAUDE.md.
     """
 
     BASE_URL = "https://atlas.microsoft.com"
@@ -218,8 +224,13 @@ class AzureMapsClient:
         last_resp: requests.Response | None = None
         for attempt in range(self._max_retries + 1):
             self._respect_rate_limit()
-            resp = self._session.get(url, params=params, timeout=self._timeout)
-            self._last_call_ts = time.monotonic()
+            # try/finally so rate-limit pacing carries forward even when the
+            # request itself raises (Timeout, ConnectionError). Otherwise a
+            # network blip retries with no spacing and stomps Azure.
+            try:
+                resp = self._session.get(url, params=params, timeout=self._timeout)
+            finally:
+                self._last_call_ts = time.monotonic()
             last_resp = resp
 
             status = resp.status_code

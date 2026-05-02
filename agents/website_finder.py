@@ -78,7 +78,17 @@ def find_website(
     session = http_session if http_session is not None else requests.Session()
 
     slug = _slugify(business_name)
-    if slug:
+    if not slug:
+        # Non-empty business_name that slugified to empty (e.g. all tokens were
+        # filler suffixes, or the name was entirely non-ASCII). Operators need
+        # a signal here — otherwise this lead silently skips Stage 1 and burns
+        # Brave budget with no indication why.
+        if business_name:
+            print(
+                f"[website_finder] WARN: business_name {business_name!r} "
+                "slugified to empty; skipping Stage 1 pattern-guess"
+            )
+    else:
         for candidate_host in _pattern_candidates(slug):
             candidate_url = f"https://{candidate_host}"
             if _head_check(candidate_url, session):
@@ -151,7 +161,7 @@ def _head_check(url: str, http_session: requests.Session) -> bool:
     sanity-check the FINAL URL against the parking-domain blocklist.
     """
     try:
-        resp = http_session.head(url, timeout=5, allow_redirects=True)
+        resp = http_session.head(url, timeout=3, allow_redirects=True)
     except (requests.HTTPError, requests.Timeout, requests.ConnectionError):
         return False
 

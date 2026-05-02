@@ -19,7 +19,7 @@ import os
 import pathlib
 import random
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
@@ -478,11 +478,15 @@ class BraveSearchClient:
       jitter to stay under that.
     - 13: exponential back-off on 429/5xx with cap.
 
-    Not thread-safe; construct one per worker. Budget guard is per-process
-    state — multiple processes sharing the same `budget_state_path` will race
-    on the read-modify-write cycle and may both believe they are under budget
-    on the boundary call. The same caveat applies to the rate limiter and
-    the underlying `requests.Session`. Same rule as the Anthropic client per
+    Not thread-safe; construct one per worker. The budget guard has
+    at-most-once-fail-loose semantics: a single-process crash between the
+    counter read and the atomic write may lose at most one increment,
+    granting one extra call past cap. Multiple processes sharing the same
+    `budget_state_path` will additionally race on the read-modify-write
+    cycle and may both believe they are under budget on the boundary call.
+    Both are acceptable for the single-operator workflow per CLAUDE.md.
+    The same thread-safety caveat applies to the rate limiter and the
+    underlying `requests.Session`. Same rule as the Anthropic client per
     CLAUDE.md.
     """
 
@@ -524,7 +528,7 @@ class BraveSearchClient:
             # Default file path includes the current UTC month — month rollover
             # naturally produces a fresh counter file the next time the client
             # is constructed.
-            month = datetime.utcnow().strftime("%Y-%m")
+            month = datetime.now(timezone.utc).strftime("%Y-%m")
             budget_state_path = pathlib.Path("state") / f"brave_budget_{month}.json"
         self._budget_state_path = pathlib.Path(budget_state_path)
 
@@ -587,7 +591,7 @@ class BraveSearchClient:
         path = self._budget_state_path
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        current_month = datetime.utcnow().strftime("%Y-%m")
+        current_month = datetime.now(timezone.utc).strftime("%Y-%m")
         count = 0
         if path.exists():
             try:

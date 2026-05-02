@@ -60,6 +60,21 @@ class FindWebsitePatternGuessTest(unittest.TestCase):
         self.assertIn("abcrenovations.com", captured_urls[0])
         self.assertNotIn("llc", captured_urls[0].lower())
 
+    def test_slugify_strips_non_ascii(self):
+        """_slugify strips non-ASCII characters, treating them as separators.
+
+        Documented behavior — most contractor sites use ASCII domains anyway.
+        Pinning current output so a future change to support unicode doesn't
+        accidentally regress this. Change deliberately if you want to keep
+        the unicode characters.
+        """
+        from agents.website_finder import _slugify
+        # "Café" -> "caf" (é stripped, becomes separator). "Renovações" ->
+        # "renovaes" (ç and õ stripped). Concatenated tokens: "cafrenovaes".
+        self.assertEqual(_slugify("Café Renovações"), "cafrenovaes")
+        # "Naïve" -> "nave" (ï stripped as separator).
+        self.assertEqual(_slugify("Naïve Builders"), "navebuilders")
+
     def test_find_website_pattern_guess_skips_parked_domains(self):
         session = MagicMock(spec=requests.Session)
         # All candidates "succeed" with 200 but tiny content (parked-page heuristic).

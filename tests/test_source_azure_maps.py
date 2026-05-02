@@ -44,6 +44,8 @@ class SourceLeadsTest(unittest.TestCase):
     def test_source_leads_returns_normalized_dicts(self):
         self.client.search_poi.side_effect = [
             [_poi("p1", name="A"), _poi("p2", name="B"), _poi("p3", name="C")],
+            [],  # second keyword returns nothing
+            [],  # third keyword returns nothing
         ]
         results = adapter.source_leads(
             self.client, state="FL", city="Orlando",

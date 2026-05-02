@@ -33,11 +33,23 @@ class Config:
     # see docs/plan-tightening-v1.md operator-side mitigations 5-6.
     yelp_fusion_key: str = ""
 
+    # Sourcing layer 3 — Brave Web Search (used by agents/website_finder.py).
+    # Free tier is 2000 queries/month with $5/mo credits applied; see
+    # docs/plan-tightening-v1.md. Budget guard below is the operator-side
+    # defense-in-depth complement to the dashboard cap.
+    brave_search_key: str = ""
+
     # ---- Rate limiting (Mitigation 10) ----
     azure_maps_rate_limit_qps: float = 1.5
     azure_maps_jitter_ms: int = 200
     yelp_rate_limit_qps: float = 1.0
     yelp_jitter_ms: int = 300
+    brave_rate_limit_qps: float = 1.0
+    brave_jitter_ms: int = 200
+
+    # ---- Brave budget guard (defense-in-depth with dashboard cap) ----
+    brave_max_monthly_queries: int = 2000
+    brave_budget_state_dir: str = "state"  # state/brave_budget_<YYYY-MM>.json
 
     # ---- Throttle handling (Mitigation 13) ----
     api_max_retries: int = 5
@@ -56,4 +68,5 @@ CONFIG = Config(
     default_niche=os.getenv("DEFAULT_NICHE", "bathroom remodeling"),
     azure_maps_key=_optional("AZURE_MAPS_KEY"),
     yelp_fusion_key=_optional("YELP_FUSION_KEY"),
+    brave_search_key=_optional("BRAVE_SEARCH_KEY"),
 )

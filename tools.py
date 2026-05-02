@@ -14,8 +14,12 @@ Places functions stay as plain functions because they are stateless.
 """
 from __future__ import annotations
 
+import json
+import os
+import pathlib
 import random
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
@@ -441,3 +445,240 @@ class YelpFusionClient:
         if last_resp is not None:
             last_resp.raise_for_status()
         raise RuntimeError("YelpFusionClient: retries exhausted with no response")
+
+
+# --------------------------------------------------------------------------- #
+# Brave Search client                                                         #
+# --------------------------------------------------------------------------- #
+
+
+class BraveBudgetExceededError(RuntimeError):
+    """Raised when the Brave search monthly query budget would be exceeded."""
+
+
+class BraveSearchClient:
+    """Rate-limited client for the Brave Web Search API.
+
+    Mirrors the AzureMapsClient/YelpFusionClient shape (token-bucket rate
+    limiter, jitter, exponential back-off on 429/5xx) with two Brave-specific
+    differences:
+      - Authenticates via an `X-Subscription-Token: <key>` header (NOT Bearer,
+        NOT a query-string parameter).
+      - Adds a per-month query *budget guard*. Before each call the client
+        reads a counter file at `budget_state_path`; if the next call would
+        push it past `max_monthly_queries` the call is aborted with a
+        `BraveBudgetExceededError` BEFORE the HTTP request fires. This is the
+        operator-side defense-in-depth complement to the dashboard cap (see
+        docs/plan-tightening-v1.md). Counter file is one-per-month
+        (`state/brave_budget_<YYYY-MM>.json`); a new month begins fresh.
+
+    Mitigations honored (see docs/plan-tightening-v1.md, Mitigation Stack):
+    - 10: token-bucket rate limiter at `rate_limit_qps` plus random jitter.
+      Brave's free tier ceiling is 1 query/sec; we pace at 1.0 qps + 200 ms
+      jitter to stay under that.
+    - 13: exponential back-off on 429/5xx with cap.
+
+    Not thread-safe; construct one per worker. The budget guard has
+    at-most-once-fail-loose semantics: a single-process crash between the
+    counter read and the atomic write may lose at most one increment,
+    granting one extra call past cap. Multiple processes sharing the same
+    `budget_state_path` will additionally race on the read-modify-write
+    cycle and may both believe they are under budget on the boundary call.
+    Both are acceptable for the single-operator workflow per CLAUDE.md.
+    The same thread-safety caveat applies to the rate limiter and the
+    underlying `requests.Session`. Same rule as the Anthropic client per
+    CLAUDE.md.
+    """
+
+    BASE_URL = "https://api.search.brave.com/res/v1"
+    WEB_SEARCH_PATH = "/web/search"
+    MAX_COUNT = 20
+
+    def __init__(
+        self,
+        api_key: str,
+        rate_limit_qps: float = 1.0,
+        jitter_ms: int = 200,
+        max_retries: int = 5,
+        backoff_base_s: float = 1.0,
+        backoff_max_s: float = 60.0,
+        request_timeout_s: int = 30,
+        max_monthly_queries: int = 2000,
+        budget_state_path: pathlib.Path | None = None,
+        session: requests.Session | None = None,
+    ) -> None:
+        if not api_key:
+            raise RuntimeError(
+                "BraveSearchClient requires an api_key. Set BRAVE_SEARCH_KEY in .env."
+            )
+        self._api_key = api_key
+        self._rate_limit_qps = float(rate_limit_qps) if rate_limit_qps else 0.0
+        self._min_interval_s = (
+            1.0 / self._rate_limit_qps if self._rate_limit_qps > 0 else 0.0
+        )
+        self._jitter_ms = max(0, int(jitter_ms))
+        self._max_retries = max(0, int(max_retries))
+        self._backoff_base_s = float(backoff_base_s)
+        self._backoff_max_s = float(backoff_max_s)
+        self._timeout = int(request_timeout_s)
+        self._session = session if session is not None else requests.Session()
+
+        self._max_monthly_queries = int(max_monthly_queries)
+        if budget_state_path is None:
+            # Default file path includes the current UTC month — month rollover
+            # naturally produces a fresh counter file the next time the client
+            # is constructed.
+            month = datetime.now(timezone.utc).strftime("%Y-%m")
+            budget_state_path = pathlib.Path("state") / f"brave_budget_{month}.json"
+        self._budget_state_path = pathlib.Path(budget_state_path)
+
+        # Token-bucket state. monotonic() because it never goes backwards
+        # under NTP adjustments. -inf means "no prior call yet, don't sleep."
+        self._last_call_ts: float = float("-inf")
+
+    # ------------------------------------------------------------------ #
+    # Public API                                                          #
+    # ------------------------------------------------------------------ #
+
+    def search_web(
+        self,
+        *,
+        query: str,
+        count: int = 10,
+        country: str = "US",
+    ) -> list[dict]:
+        """Brave Web Search. Returns the raw `web.results` list.
+
+        `count` is clamped to MAX_COUNT (20) — Brave's documented per-request
+        ceiling. The full response wraps results under `web.results`; missing
+        keys yield an empty list rather than raising, so a callers iterating
+        results don't have to special-case it.
+
+        Budget guard: increments and persists the per-month counter BEFORE
+        the HTTP call. When the next increment would exceed
+        `max_monthly_queries`, raises `BraveBudgetExceededError` and the
+        request is not sent.
+        """
+        # Reserve a budget slot first; if we're over the cap, we want to
+        # abort BEFORE the rate limiter sleep and BEFORE the HTTP call.
+        self._reserve_budget_slot()
+
+        params: dict[str, Any] = {
+            "q": query,
+            "count": min(int(count), self.MAX_COUNT),
+            "country": country,
+            "safesearch": "moderate",
+        }
+        data = self._get_with_retries(
+            self.BASE_URL + self.WEB_SEARCH_PATH, params
+        )
+        return list(data.get("web", {}).get("results") or [])
+
+    # ------------------------------------------------------------------ #
+    # Internals                                                           #
+    # ------------------------------------------------------------------ #
+
+    def _reserve_budget_slot(self) -> None:
+        """Read counter, raise if next call would exceed cap, otherwise
+        increment and atomically persist.
+
+        Atomicity: write to a sibling temp file in the same directory then
+        os.replace() onto the target. os.replace() is atomic on POSIX and on
+        Windows for files on the same volume, so a crash mid-write leaves the
+        previous good counter file intact rather than producing a half-written
+        JSON.
+        """
+        path = self._budget_state_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        current_month = datetime.now(timezone.utc).strftime("%Y-%m")
+        count = 0
+        if path.exists():
+            try:
+                data = json.loads(path.read_text())
+                # If the on-disk month doesn't match (e.g. someone reused an
+                # explicit path across months) start fresh — the cap is a
+                # *monthly* budget, not a perpetual one.
+                if data.get("month") == current_month:
+                    count = int(data.get("count", 0))
+            except (json.JSONDecodeError, ValueError, OSError):
+                # Corrupt counter file: treat as zero rather than crashing the
+                # pipeline. The next successful write will heal it.
+                count = 0
+
+        if count + 1 > self._max_monthly_queries:
+            raise BraveBudgetExceededError(
+                f"Brave monthly query budget exceeded for {current_month}: "
+                f"{count} of {self._max_monthly_queries} used; "
+                f"next call would be #{count + 1}."
+            )
+
+        new_count = count + 1
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps({"month": current_month, "count": new_count}))
+        os.replace(tmp, path)
+
+    def _respect_rate_limit(self) -> None:
+        """Token-bucket pacing + jitter (Mitigation 10)."""
+        if self._min_interval_s <= 0:
+            return
+        now = time.monotonic()
+        elapsed = now - self._last_call_ts
+        wait = self._min_interval_s - elapsed
+        if wait > 0:
+            jitter_s = (
+                random.random() * (self._jitter_ms / 1000.0)
+                if self._jitter_ms > 0
+                else 0.0
+            )
+            time.sleep(wait + jitter_s)
+
+    def _get_with_retries(self, url: str, params: dict[str, Any]) -> dict:
+        """GET with X-Subscription-Token auth + exp back-off on 429/5xx (Mit. 13).
+
+        Other 4xx errors raise immediately — those are bug signal, not throttle
+        signal, and per CLAUDE.md our own bugs should crash so we see them.
+        """
+        headers = {
+            "X-Subscription-Token": self._api_key,
+            "Accept": "application/json",
+        }
+        last_resp: requests.Response | None = None
+        for attempt in range(self._max_retries + 1):
+            self._respect_rate_limit()
+            # try/finally so rate-limit pacing carries forward even when the
+            # request itself raises (Timeout, ConnectionError). Otherwise a
+            # network blip retries with no spacing and stomps Brave.
+            try:
+                resp = self._session.get(
+                    url, params=params, headers=headers, timeout=self._timeout
+                )
+            finally:
+                self._last_call_ts = time.monotonic()
+            last_resp = resp
+
+            status = resp.status_code
+            if status < 400:
+                return resp.json()
+
+            retryable = status == 429 or 500 <= status < 600
+            if not retryable or attempt >= self._max_retries:
+                resp.raise_for_status()
+                raise RuntimeError(
+                    f"BraveSearchClient: unexpected non-2xx without exception "
+                    f"(status={status})"
+                )
+
+            backoff = min(
+                self._backoff_max_s, self._backoff_base_s * (2 ** attempt)
+            )
+            jitter_s = (
+                random.random() * (self._jitter_ms / 1000.0)
+                if self._jitter_ms > 0
+                else 0.0
+            )
+            time.sleep(backoff + jitter_s)
+
+        if last_resp is not None:
+            last_resp.raise_for_status()
+        raise RuntimeError("BraveSearchClient: retries exhausted with no response")

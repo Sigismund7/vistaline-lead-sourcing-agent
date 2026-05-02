@@ -29,9 +29,15 @@ class Config:
     # raise RuntimeError when actually constructing the client.
     azure_maps_key: str = ""
 
+    # Sourcing layer 2 — Yelp Fusion API. Free-tier ceiling is 5000 calls/day;
+    # see docs/plan-tightening-v1.md operator-side mitigations 5-6.
+    yelp_fusion_key: str = ""
+
     # ---- Rate limiting (Mitigation 10) ----
     azure_maps_rate_limit_qps: float = 1.5
     azure_maps_jitter_ms: int = 200
+    yelp_rate_limit_qps: float = 1.0
+    yelp_jitter_ms: int = 300
 
     # ---- Throttle handling (Mitigation 13) ----
     api_max_retries: int = 5
@@ -41,6 +47,7 @@ class Config:
 
     # ---- Source-search radius / limits ----
     azure_maps_default_radius_m: int = 25000
+    yelp_default_radius_m: int = 25000
 
 
 CONFIG = Config(
@@ -48,4 +55,5 @@ CONFIG = Config(
     google_places_key=_require("GOOGLE_PLACES_KEY"),
     default_niche=os.getenv("DEFAULT_NICHE", "bathroom remodeling"),
     azure_maps_key=_optional("AZURE_MAPS_KEY"),
+    yelp_fusion_key=_optional("YELP_FUSION_KEY"),
 )

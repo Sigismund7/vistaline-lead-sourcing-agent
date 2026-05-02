@@ -260,3 +260,184 @@ class AzureMapsClient:
         if last_resp is not None:
             last_resp.raise_for_status()
         raise RuntimeError("AzureMapsClient: retries exhausted with no response")
+
+
+# --------------------------------------------------------------------------- #
+# Yelp Fusion client                                                          #
+# --------------------------------------------------------------------------- #
+
+
+class YelpFusionClient:
+    """Rate-limited client for the Yelp Fusion Business Search API.
+
+    Mirrors the AzureMapsClient shape (token-bucket rate limiter, jitter,
+    exponential back-off on 429/5xx) but differs in two ways:
+      - Authenticates via an Authorization: Bearer <key> header rather than a
+        query-string parameter.
+      - Exposes a single Business Search endpoint; pagination via `offset` is
+        the caller's responsibility, since adapters often want to interleave
+        offset paging with category/term rotation (Mitigation 11).
+
+    Mitigations honored (see docs/plan-tightening-v1.md, Mitigation Stack):
+    - 10: token-bucket rate limiter at `rate_limit_qps` plus random jitter.
+      Yelp's free tier ceiling is 5 calls/sec; we pace at 1.0 qps + 300 ms
+      jitter to stay well under that and to keep daily call volume sane
+      against the 5000/day cap.
+    - 13: exponential back-off on 429/5xx with cap.
+
+    Not thread-safe; construct a separate instance per worker thread. The
+    `_last_call_ts` token-bucket state and the underlying `requests.Session`
+    are unguarded — sharing across `ThreadPoolExecutor` workers would race
+    the rate limiter and could corrupt the session's connection pool. Same
+    rule as the Anthropic client per CLAUDE.md.
+    """
+
+    BASE_URL = "https://api.yelp.com/v3"
+    BUSINESS_SEARCH_PATH = "/businesses/search"
+
+    # Yelp documents these as hard ceilings on the Business Search endpoint.
+    # Clamping (rather than erroring) keeps the client tolerant of callers
+    # that pass through user-supplied counts without policing them.
+    MAX_LIMIT = 50
+    MAX_RADIUS_M = 40000
+
+    def __init__(
+        self,
+        api_key: str,
+        rate_limit_qps: float = 1.0,
+        jitter_ms: int = 300,
+        max_retries: int = 5,
+        backoff_base_s: float = 1.0,
+        backoff_max_s: float = 60.0,
+        request_timeout_s: int = 30,
+        session: requests.Session | None = None,
+    ) -> None:
+        if not api_key:
+            raise RuntimeError(
+                "YelpFusionClient requires an api_key. Set YELP_FUSION_KEY in .env."
+            )
+        self._api_key = api_key
+        self._rate_limit_qps = float(rate_limit_qps) if rate_limit_qps else 0.0
+        self._min_interval_s = (
+            1.0 / self._rate_limit_qps if self._rate_limit_qps > 0 else 0.0
+        )
+        self._jitter_ms = max(0, int(jitter_ms))
+        self._max_retries = max(0, int(max_retries))
+        self._backoff_base_s = float(backoff_base_s)
+        self._backoff_max_s = float(backoff_max_s)
+        self._timeout = int(request_timeout_s)
+        self._session = session if session is not None else requests.Session()
+
+        # Token-bucket state. monotonic() because it never goes backwards
+        # under NTP adjustments. -inf means "no prior call yet, don't sleep."
+        self._last_call_ts: float = float("-inf")
+
+    # ------------------------------------------------------------------ #
+    # Public API                                                          #
+    # ------------------------------------------------------------------ #
+
+    def search_businesses(
+        self,
+        *,
+        term: str | None = None,
+        location: str,
+        categories: str | None = None,
+        radius_m: int = 25000,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Yelp Business Search. Returns the raw `businesses` list.
+
+        `location` is a free-form string ("Orlando, FL"); Yelp geocodes it
+        internally so we skip the separate geocode step Azure requires.
+        `categories` is a comma-separated alias list (e.g.
+        "contractors,kitchen_and_bath,homeservices"); see Mitigation 12.
+
+        `limit` is clamped to MAX_LIMIT (50) and `radius_m` to MAX_RADIUS_M
+        (40000) — Yelp's documented ceilings. Pagination beyond 50 results
+        is the caller's responsibility via the `offset` argument (max 240).
+        """
+        params: dict[str, Any] = {
+            "location": location,
+            "limit": min(int(limit), self.MAX_LIMIT),
+            "radius": min(int(radius_m), self.MAX_RADIUS_M),
+            "offset": int(offset),
+        }
+        if term:
+            params["term"] = term
+        if categories:
+            params["categories"] = categories
+
+        data = self._get_with_retries(
+            self.BASE_URL + self.BUSINESS_SEARCH_PATH, params
+        )
+        return list(data.get("businesses") or [])
+
+    # ------------------------------------------------------------------ #
+    # Internals                                                           #
+    # ------------------------------------------------------------------ #
+
+    def _respect_rate_limit(self) -> None:
+        """Token-bucket pacing + jitter (Mitigation 10)."""
+        if self._min_interval_s <= 0:
+            return
+        now = time.monotonic()
+        elapsed = now - self._last_call_ts
+        wait = self._min_interval_s - elapsed
+        if wait > 0:
+            jitter_s = (
+                random.random() * (self._jitter_ms / 1000.0)
+                if self._jitter_ms > 0
+                else 0.0
+            )
+            time.sleep(wait + jitter_s)
+
+    def _get_with_retries(self, url: str, params: dict[str, Any]) -> dict:
+        """GET with Bearer auth + exponential back-off on 429/5xx (Mitigation 13).
+
+        Other 4xx errors raise immediately — those are bug signal, not throttle
+        signal, and per CLAUDE.md our own bugs should crash so we see them.
+        """
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Accept": "application/json",
+        }
+        last_resp: requests.Response | None = None
+        for attempt in range(self._max_retries + 1):
+            self._respect_rate_limit()
+            # try/finally so rate-limit pacing carries forward even when the
+            # request itself raises (Timeout, ConnectionError). Otherwise a
+            # network blip retries with no spacing and stomps Yelp.
+            try:
+                resp = self._session.get(
+                    url, params=params, headers=headers, timeout=self._timeout
+                )
+            finally:
+                self._last_call_ts = time.monotonic()
+            last_resp = resp
+
+            status = resp.status_code
+            if status < 400:
+                return resp.json()
+
+            retryable = status == 429 or 500 <= status < 600
+            if not retryable or attempt >= self._max_retries:
+                resp.raise_for_status()
+                raise RuntimeError(
+                    f"YelpFusionClient: unexpected non-2xx without exception "
+                    f"(status={status})"
+                )
+
+            backoff = min(
+                self._backoff_max_s, self._backoff_base_s * (2 ** attempt)
+            )
+            jitter_s = (
+                random.random() * (self._jitter_ms / 1000.0)
+                if self._jitter_ms > 0
+                else 0.0
+            )
+            time.sleep(backoff + jitter_s)
+
+        if last_resp is not None:
+            last_resp.raise_for_status()
+        raise RuntimeError("YelpFusionClient: retries exhausted with no response")

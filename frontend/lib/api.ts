@@ -1,17 +1,20 @@
 import type { Campaign, RunEvent, Lead, CampaignStatus, StepName, EventLevel } from "@/lib/types";
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const SECRET = process.env.VISTALINE_API_SECRET ?? "";
+const IS_BROWSER = typeof window !== "undefined";
+const SERVER_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const SERVER_SECRET = process.env.VISTALINE_API_SECRET ?? "";
 
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Api-Key": SECRET,
-      ...init.headers,
-    },
-  });
+  // On the server, hit FastAPI directly with the secret.
+  // In the browser, hit our Next.js proxy route — the proxy injects the secret server-side.
+  const url = IS_BROWSER ? `/api/proxy${path}` : `${SERVER_BASE}${path}`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(init.headers as Record<string, string> | undefined),
+  };
+  if (!IS_BROWSER) headers["X-Api-Key"] = SERVER_SECRET;
+
+  const res = await fetch(url, { ...init, headers });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`API ${res.status}: ${text}`);
@@ -74,7 +77,8 @@ export function csvUrl(campaignId: string, type: "findymail" | "master"): string
     type === "findymail"
       ? `/campaigns/${campaignId}/leads.csv`
       : `/campaigns/${campaignId}/leads/master.csv`;
-  return `${BASE}${path}?x-api-key=${encodeURIComponent(SECRET)}`;
+  // Browser hits the proxy (which injects the secret server-side).
+  return `/api/proxy${path}`;
 }
 
 // ---- Transformers (snake_case DB → camelCase UI) ----

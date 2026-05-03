@@ -61,6 +61,12 @@ class Config:
     azure_maps_default_radius_m: int = 25000
     yelp_default_radius_m: int = 25000
 
+    # ---- Sourcer cross-source dedup ----
+    # rapidfuzz token_sort_ratio threshold above which two leads from
+    # different sources are considered duplicates and merged. Default 85
+    # is conservative — calibrate during smoke testing if needed.
+    dedup_match_threshold: int = 85
+
 
 CONFIG = Config(
     anthropic_key=_require("ANTHROPIC_API_KEY"),

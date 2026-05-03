@@ -46,22 +46,6 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --muted: #18181b;
-    --muted-foreground: #a1a1aa;
-    --border: #27272a;
-    --input: #27272a;
-    --ring: #3b82f6;
-    --brand: #3b82f6;
-    --brand-hover: #2563eb;
-    --brand-foreground: #ffffff;
-    --success: #16a34a;
-    --warning: #d97706;
-    --danger: #dc2626;
-    --info: #3b82f6;
-  }
-}
 
 @theme inline {
   --color-background: var(--background);

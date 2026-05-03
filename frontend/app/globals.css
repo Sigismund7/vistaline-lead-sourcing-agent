@@ -56,6 +56,10 @@
     --brand: #3b82f6;
     --brand-hover: #2563eb;
     --brand-foreground: #ffffff;
+    --success: #16a34a;
+    --warning: #d97706;
+    --danger: #dc2626;
+    --info: #3b82f6;
   }
 }
 
@@ -142,6 +146,13 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+  --brand: #3b82f6;
+  --brand-hover: #2563eb;
+  --brand-foreground: #ffffff;
+  --success: #16a34a;
+  --warning: #d97706;
+  --danger: #dc2626;
+  --info: #3b82f6;
 }
 
 @layer base {

@@ -57,6 +57,10 @@ class Config:
     api_backoff_max_s: float = 60.0
     api_request_timeout_s: int = 30
 
+    supabase_url: str = ""
+    supabase_service_role_key: str = ""
+    vistaline_api_secret: str = ""
+
     # ---- Source-search radius / limits ----
     azure_maps_default_radius_m: int = 25000
     yelp_default_radius_m: int = 25000
@@ -75,4 +79,7 @@ CONFIG = Config(
     azure_maps_key=_optional("AZURE_MAPS_KEY"),
     yelp_fusion_key=_optional("YELP_FUSION_KEY"),
     brave_search_key=_optional("BRAVE_SEARCH_KEY"),
+    supabase_url=_optional("SUPABASE_URL"),
+    supabase_service_role_key=_optional("SUPABASE_SERVICE_ROLE_KEY"),
+    vistaline_api_secret=_optional("VISTALINE_API_SECRET"),
 )

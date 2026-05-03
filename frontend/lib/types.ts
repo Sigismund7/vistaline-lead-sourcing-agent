@@ -32,6 +32,7 @@ export interface Campaign {
   withEmail: number;
   spendUsd: number;
   triggeredBy: string;
+  completedSteps?: string[];
 }
 
 export interface RunEvent {

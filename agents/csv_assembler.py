@@ -30,6 +30,9 @@ MASTER_COLUMNS = [
     "business_name", "phone", "area_code", "website", "domain", "address",
     "owner_full_name", "owner_first", "owner_last", "owner_source",
     "email",
+    "x_project", "y_detail", "y_source",
+    "linkedin_url", "linkedin_source",
+    "personalization_status",
     "place_id",
 ]
 
@@ -77,6 +80,12 @@ def run(state: CampaignState) -> tuple[str, str]:
                 "owner_last": lead.owner_last,
                 "owner_source": lead.owner_source,
                 "email": lead.email,
+                "x_project": lead.x_project,
+                "y_detail": lead.y_detail,
+                "y_source": lead.y_source,
+                "linkedin_url": lead.linkedin_url,
+                "linkedin_source": lead.linkedin_source,
+                "personalization_status": lead.personalization_status,
                 "place_id": lead.place_id,
             })
 

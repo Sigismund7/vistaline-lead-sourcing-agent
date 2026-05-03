@@ -16,8 +16,8 @@ export function AppHeader({ activePath }: { activePath?: string }) {
       <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-6">
         <Link href="/campaigns" className="flex items-center gap-3" data-testid="wordmark">
           <span className="font-heading text-base font-semibold tracking-widest uppercase">
-            <span className="text-brand">Vistaline</span>
-            <span className="text-gold">Digital</span>
+            <span className="text-[#2563eb]">Vistaline</span>
+            <span className="text-foreground">Digital</span>
           </span>
           <span
             aria-hidden

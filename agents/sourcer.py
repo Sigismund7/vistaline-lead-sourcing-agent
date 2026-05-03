@@ -25,7 +25,6 @@ longer the data source) so run.py is untouched (Premise 5).
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 import requests
 from rapidfuzz import fuzz
@@ -143,6 +142,9 @@ def _dedupe_cross_source(leads: list[dict], threshold: int) -> list[dict]:
                 if surv.get("source") == "azure_maps" and cand.get("source") == "yelp_fusion":
                     surv["source"] = "azure_maps+yelp_fusion"
                     surv["raw_yelp"] = cand.get("raw")
+                # Defensive: handles the case where a future caller passes leads in
+                # Yelp-first order. run() currently always passes Azure-first, but
+                # this branch preserves the "Azure wins on tie" merge semantics.
                 elif surv.get("source") == "yelp_fusion" and cand.get("source") == "azure_maps":
                     new_record = dict(cand)
                     new_record["source"] = "azure_maps+yelp_fusion"
@@ -218,6 +220,13 @@ def _to_lead(normalized: dict) -> Lead:
     `place_id` is mapped from `source_id` (legacy field name; `Lead` was
     designed when Google Places was the only source). `domain` and
     `area_code` are derived helpers consistent with the pre-Cycle-4 sourcer.
+
+    Defensive contract: optional fields (phone, website, address, lat, lon,
+    raw) default to empty strings when missing — a buggy adapter returning
+    a partial dict shouldn't crash the router. `business_name` and
+    `source_id` are also resolved via `.get(..., "")` so a fully-malformed
+    dict produces an empty-string Lead rather than a `KeyError`; callers
+    should still treat them as required and surface upstream if absent.
     """
     website = normalized.get("website", "") or ""
     phone = normalized.get("phone", "") or ""

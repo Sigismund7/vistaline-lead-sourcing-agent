@@ -218,6 +218,72 @@ class SourcerRunTest(unittest.TestCase):
             sourcer.run(self.state)
             self.assertEqual(len(self.state.leads), 5)
 
+    def test_run_dedup_does_not_transitively_merge(self):
+        """Single-pass dedup: if A matches B and B matches C, but A doesn't
+        match C directly, A and C are NOT merged into each other.
+
+        Documented behavior; lock it down. Verified scores at the
+        CONFIG.dedup_match_threshold=85 ceiling:
+          A vs B = 95 (Azure 'Foo Renovation Inc 100 Main' ~ Yelp 'Foo
+            Renovation 100 Main') -> merged.
+          A vs C = 71 (Azure ~ Yelp 'Foo Renovation 999 Maple') -> below
+            threshold, C survives separately.
+        A regression that started comparing each candidate against all
+        already-merged-into survivors transitively would still pass this
+        test, but a regression that started chaining matches across
+        candidates would not.
+        """
+        with patch("agents.sourcer.azure_source.source_leads") as mock_az, \
+             patch("agents.sourcer.yelp_source.source_leads") as mock_yp, \
+             patch("agents.sourcer.find_website", return_value=None):
+            mock_az.return_value = [
+                _normalized(source="azure_maps", source_id="a1",
+                            business_name="Foo Renovation Inc",
+                            address="100 Main St, Orlando, FL",
+                            website="https://foo.com"),
+            ]
+            mock_yp.return_value = [
+                _normalized(source="yelp_fusion", source_id="y1",
+                            business_name="Foo Renovation",
+                            address="100 Main St, Orlando, FL"),
+                _normalized(source="yelp_fusion", source_id="y2",
+                            business_name="Foo Renovation",
+                            address="999 Maple Ave, Orlando, FL"),
+            ]
+            sourcer.run(self.state)
+            # Two survivors: the Azure+Yelp[0] merge, and Yelp[1] standalone.
+            self.assertEqual(len(self.state.leads), 2)
+            addresses = sorted(l.address for l in self.state.leads)
+            self.assertEqual(
+                addresses,
+                ["100 Main St, Orlando, FL", "999 Maple Ave, Orlando, FL"],
+            )
+
+    def test_run_handles_partial_lead_dict_from_adapter(self):
+        """Defensive _to_lead: if a source adapter returns a dict missing
+        optional fields, the lead is constructed with empty defaults
+        rather than raising KeyError.
+        """
+        partial = {"source": "azure_maps",
+                   "business_name": "Partial Co",
+                   "source_id": "p1"}
+        with patch("agents.sourcer.azure_source.source_leads",
+                   return_value=[partial]), \
+             patch("agents.sourcer.yelp_source.source_leads", return_value=[]), \
+             patch("agents.sourcer.find_website", return_value=None) as mock_fw:
+            sourcer.run(self.state)
+            self.assertEqual(len(self.state.leads), 1)
+            lead = self.state.leads[0]
+            self.assertEqual(lead.business_name, "Partial Co")
+            self.assertEqual(lead.place_id, "p1")
+            self.assertEqual(lead.phone, "")
+            self.assertEqual(lead.website, "")
+            self.assertEqual(lead.address, "")
+            self.assertEqual(lead.area_code, "")
+            self.assertEqual(lead.domain, "")
+            # Empty website triggers the website finder.
+            mock_fw.assert_called_once()
+
     def test_run_survives_one_source_failure(self):
         """Azure raising shouldn't crash sourcer; Yelp results still land."""
         with patch("agents.sourcer.azure_source.source_leads",

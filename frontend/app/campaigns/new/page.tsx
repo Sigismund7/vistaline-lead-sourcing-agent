@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Check, ChevronsUpDown, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -12,6 +12,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Badge } from "@/components/ui/badge";
 import { NICHE_PRESETS } from "@/lib/mocks/niches";
 import { cn } from "@/lib/utils";
+import { startCampaign } from "@/app/campaigns/actions";
 
 const STATES = [
   "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY",
@@ -20,7 +21,6 @@ const STATES = [
 const CUSTOM_SLUG = "__custom__";
 
 export default function NewCampaignPage() {
-  const router = useRouter();
   const [city, setCity] = useState("");
   const [stateAbbr, setStateAbbr] = useState("FL");
   const [count, setCount] = useState(50);
@@ -58,9 +58,16 @@ export default function NewCampaignPage() {
     return (count * 0.045).toFixed(2);
   }
 
-  function handleStart(e: React.FormEvent) {
+  async function handleStart(e: React.FormEvent) {
     e.preventDefault();
-    router.push("/campaigns/20260502-153012-a1b2c3");
+    const niche = selected?.displayName ?? (isCustom ? customNiche : "");
+    if (!city || !niche) return;
+    await startCampaign({
+      city,
+      stateAbbr,
+      niche,
+      targetCount: count,
+    });
   }
 
   return (
@@ -250,8 +257,8 @@ export default function NewCampaignPage() {
         </Card>
 
         <div className="flex items-center justify-end gap-3">
-          <Button type="button" variant="ghost" onClick={() => router.push("/campaigns")}>
-            Cancel
+          <Button type="button" variant="ghost" asChild>
+            <Link href="/campaigns">Cancel</Link>
           </Button>
           <Button type="submit">Start campaign</Button>
         </div>

@@ -251,3 +251,117 @@ def _yelp_photo_bytes(business_name: str, address: str, *, yelp_key: str) -> byt
         print(f"[personalizer] WARN: yelp photo fetch {photo_url}: {type(e).__name__} {e}")
         return None
     return resp.content
+
+
+# ---------------------------------------------------------------------------
+# Parallel orchestrator
+# ---------------------------------------------------------------------------
+
+import concurrent.futures as futures  # noqa: E402
+
+from state import CampaignState, Lead  # noqa: E402
+from agents.gallery_finder import find_and_screenshot  # noqa: E402
+
+
+STEP_NAME = "personalizer"
+
+
+def _one_lead(
+    lead: Lead,
+    *,
+    anthropic_key: str,
+    yelp_key: str,
+    model: str,
+    timeout_s: int,
+) -> dict[str, str]:
+    """Process a single lead. Returns the field updates as a dict.
+
+    Skips leads with no email (post-FindyMail gating). Tries website gallery
+    first, falls back to Yelp photo. Each call constructs its own Anthropic
+    client (CLAUDE.md: never share clients across threads).
+    """
+    if not lead.email:
+        return {"personalization_status": "no_email_skip"}
+
+    img, source_url = find_and_screenshot(lead.website, timeout_s=timeout_s)
+    y_source = "website_gallery" if img else ""
+
+    if img is None and yelp_key:
+        img = _yelp_photo_bytes(lead.business_name, lead.address, yelp_key=yelp_key)
+        y_source = "yelp_photo" if img else ""
+
+    if img is None:
+        return {"personalization_status": "no_gallery"}
+
+    parsed = extract_xy(img, anthropic_key=anthropic_key, model=model)
+    if not parsed["x_project"] or not parsed["y_detail"]:
+        return {"personalization_status": "vision_failed", "y_source": y_source}
+
+    return {
+        "x_project": parsed["x_project"],
+        "y_detail": parsed["y_detail"],
+        "y_source": y_source,
+        "personalization_status": "ok",
+    }
+
+
+def run(
+    state: CampaignState,
+    anthropic_key: str,
+    *,
+    yelp_key: str,
+    model: str,
+    max_parallel: int,
+    timeout_s: int,
+) -> None:
+    """Fill x_project / y_detail / y_source / personalization_status on every
+    kept lead with an email. Idempotent — re-running on the same state skips
+    leads that already have personalization_status set.
+    """
+    if state.is_done(STEP_NAME):
+        state.info(STEP_NAME, "already done, skipping")
+        return
+
+    targets = [
+        l for l in state.leads
+        if l.kept and l.email and not l.personalization_status
+    ]
+    skipped_no_email = sum(1 for l in state.leads if l.kept and not l.email)
+    state.info(
+        STEP_NAME,
+        f"processing {len(targets)} leads (skipping {skipped_no_email} with no email)",
+    )
+
+    with futures.ThreadPoolExecutor(max_workers=max_parallel) as ex:
+        future_to_lead = {
+            ex.submit(
+                _one_lead,
+                lead,
+                anthropic_key=anthropic_key,
+                yelp_key=yelp_key,
+                model=model,
+                timeout_s=timeout_s,
+            ): lead
+            for lead in targets
+        }
+        for fut in futures.as_completed(future_to_lead):
+            lead = future_to_lead[fut]
+            try:
+                update = fut.result()
+            except Exception as e:
+                state.info(
+                    STEP_NAME,
+                    f"crash on {lead.business_name!r}: {type(e).__name__} {e}",
+                    level="error",
+                )
+                lead.personalization_status = "vision_failed"
+                continue
+            for k, v in update.items():
+                setattr(lead, k, v)
+            state.info(
+                STEP_NAME,
+                f"{lead.business_name}: status={lead.personalization_status} "
+                f"x={lead.x_project!r} y={lead.y_detail!r}",
+            )
+
+    state.mark_done(STEP_NAME)

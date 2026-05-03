@@ -145,7 +145,7 @@ Migration covered in §3.
 | Phase | Scope | Branch | Status |
 |---|---|---|---|
 | Phase 0 | Two-layer sourcing (Azure Maps + Yelp Fusion + Brave) — backend-only, CLI-driven | `phase0-*-stack` | In progress (Yelp cycle now) |
-| Phase 1 — frontend skeleton | Next.js + shadcn scaffold on Vercel + auth + niche catalog UI + new-campaign form (mocked API) | `phase1-frontend-skeleton` | Not started |
+| Phase 1 — frontend skeleton | Next.js + shadcn scaffold on Vercel + auth + niche catalog UI + new-campaign form (mocked API) | `phase1-frontend-skeleton` | Complete (mocks landed; auth + API are Phase 2) |
 | Phase 2 — FastAPI wrap | FastAPI service on Railway wrapping existing `run.py`; Postgres/Redis; SSE events; campaign list endpoint | `phase2-api-layer` | Not started |
 | Phase 3 — live run view | Step rail + event stream UI; resume button; cancel mid-run | `phase3-live-run` | Not started |
 | Phase 4 — preview & export | Result table with row-exclude; CSV download endpoint; cost panel | `phase4-preview-export` | Not started |
@@ -176,6 +176,7 @@ Phase 0 must complete before Phase 2 (the engine has to work CLI-first). Phase 1
 | 2026-05-02 | Headline font: **Geist** (v0 default) confirmed | Operator confirmed — site uses v0, internal tool inherits same font |
 | 2026-05-02 | Single-tenant data model — internal Vistaline team only, forever | Operator confirmed — no org/tenant boundaries needed; saves schema complexity |
 | 2026-05-02 | Visual polish: production-quality internal-tool aesthetic (Linear/Vercel/Resend density) | Operator: "internal tool forever, but might as well make it look decent" |
+| 2026-05-02 | Phase 1 mocks landed: campaigns list, new-campaign form, live run view, results table | Built static, no-auth, no-data Next.js + shadcn pages on `phase1-frontend-skeleton`; Playwright smoke tests cover each route; screenshots in `docs/brand/mockups/` |
 
 ---
 

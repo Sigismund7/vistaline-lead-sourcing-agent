@@ -377,6 +377,19 @@ class YelpFusionClient:
         )
         return list(data.get("businesses") or [])
 
+    def get_business_details(self, *, business_id: str) -> dict:
+        """Yelp Business Details for a single business ID.
+
+        Returns the full details dict including the `photos` list (up to 3
+        photo URLs on the free tier). Uses the same rate-limited, retrying
+        transport as `search_businesses` — callers should treat a missing or
+        empty `photos` key as "no photos available" rather than an error.
+        """
+        url = f"{self.BASE_URL}/businesses/{business_id}"
+        # Details endpoint takes no query params beyond auth; pass empty dict
+        # so _get_with_retries' signature is satisfied.
+        return self._get_with_retries(url, {})
+
     # ------------------------------------------------------------------ #
     # Internals                                                           #
     # ------------------------------------------------------------------ #

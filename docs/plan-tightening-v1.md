@@ -272,7 +272,12 @@ Replace bare "kitchen" keyword rotation in both source adapters with terms that 
 **Yelp terms** (replace `_TERMS_BY_NICHE["kitchen remodelers"]`, drop `None`):
 - `"kitchen and bath remodeling"`, `"kitchen cabinet installation"`, `"bathroom remodeling"`, `"home remodeling contractor"`
 
-No logic changes — dict values only. No new tests needed (existing tests mock HTTP layer).
+No logic changes — dict values only. Before submitting, verify that existing test
+`side_effect` lists in `tests/test_source_azure_maps.py` and
+`tests/test_source_yelp_fusion.py` are correctly sized for the new keyword counts
+(Azure: 3, Yelp: 4). Update side_effect entries if any are keyed on specific keyword
+strings rather than call count.
+
 Verify with a count=5 run: food businesses should no longer appear in sourced results.
 
 ### Task 2.CD — Cross-run dedup cache (prevents re-sourcing same businesses across campaigns)
@@ -283,7 +288,13 @@ Two public functions:
 - `filter_unseen(leads, city, state_abbr, ttl_days) -> list[dict]` — returns only leads not in cache within TTL
 - `mark_seen(leads, city, state_abbr, campaign_id)` — upserts new leads into cache
 
-**DB:** `state/leads_cache.db` (auto-created, add to `.gitignore`)
+Both functions **skip leads with empty `source_id`** (falsy check) to avoid false
+cache hits from defensive-default adapter output.
+
+**DB path:** resolved as `Path(__file__).parent.parent / "state" / "leads_cache.db"` —
+absolute, same pattern as `csv_assembler.py`. Do NOT add a config field for this path.
+DB is auto-created by `_init_db()` called at module import level (`CREATE TABLE IF NOT EXISTS`).
+Add `state/leads_cache.db` to `.gitignore`.
 
 Schema:
 ```sql
@@ -303,25 +314,38 @@ CREATE TABLE seen_leads (
 ```python
 deduped = leads_cache.filter_unseen(deduped, state.city, state.state_abbr, CONFIG.leads_cache_ttl_days)
 ```
-After `state.leads.append(...)` loop:
+After the append loop, track and mark exactly what was appended:
 ```python
-leads_cache.mark_seen(deduped[:state.target_count], state.city, state.state_abbr, state.campaign_id)
+new_leads: list[dict] = []
+for normalized in deduped:
+    if len(state.leads) >= state.target_count:
+        break
+    state.leads.append(_to_lead(normalized))
+    new_leads.append(normalized)
+leads_cache.mark_seen(new_leads, state.city, state.state_abbr, state.campaign_id)
 ```
+If `len(new_leads) < state.target_count`, log a warning:
+`state.info("sourcer", "cache filtered short", found=len(new_leads), target=state.target_count)`
 
-**Modified: `config.py`** — add two fields:
+**Modified: `config.py`** — add one field only:
 ```python
 leads_cache_ttl_days: int = 30
-leads_cache_path: str = "state/leads_cache.db"
 ```
 
-If cache filtering causes sourcer to fall short of `target_count`, log a warning with how many uncached leads were found.
+**Tests (TDD):**
 
-**Tests (TDD — all in `tests/test_leads_cache.py`):**
+`tests/test_leads_cache.py`:
 1. `filter_unseen` returns all leads when cache is empty
 2. `filter_unseen` drops leads seen within TTL
 3. `filter_unseen` keeps leads seen outside TTL (expired)
 4. `mark_seen` writes correctly; second call on same lead is a no-op (upsert)
-5. Sourcer integration: second run on same city returns 0 leads (all cached)
+5. `filter_unseen` and `mark_seen` skip leads with `source_id=""`
+6. `mark_seen` for Dallas does NOT block `filter_unseen` for Orlando with same source_id
+   (verifies city column is stored and used in WHERE clause)
+
+`tests/test_sourcer.py` (new test):
+7. When cache returns empty list, sourcer logs `"cache filtered short"` warning with
+   correct `found` and `target` values
 
 Cost-discipline gate on every task.
 

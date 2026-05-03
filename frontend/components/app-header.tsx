@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { UserButton } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
 
 const NAV: Array<{ href: string; label: string }> = [
@@ -46,12 +47,7 @@ export function AppHeader({ activePath }: { activePath?: string }) {
           })}
         </nav>
         <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="hidden sm:inline">$3.21 spend MTD</span>
-          <span
-            aria-hidden
-            className="hidden h-4 w-px bg-border sm:block"
-          />
-          <span className="rounded-sm border border-border bg-muted px-2 py-1 font-mono text-foreground">DG</span>
+          <UserButton />
         </div>
       </div>
     </header>

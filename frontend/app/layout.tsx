@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Cinzel, Geist, Geist_Mono } from "next/font/google";
+import { ClerkProvider } from "@clerk/nextjs";
 import { AppHeader } from "@/components/app-header";
 import "./globals.css";
 
@@ -30,14 +31,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${cinzel.variable} ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col bg-background text-foreground font-sans">
-        <AppHeader activePath="/campaigns" />
-        <main className="flex-1">{children}</main>
-      </body>
-    </html>
+    <ClerkProvider afterSignOutUrl="/sign-in">
+      <html
+        lang="en"
+        className={`${cinzel.variable} ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      >
+        <body className="min-h-full flex flex-col bg-background text-foreground font-sans">
+          <AppHeader activePath="/campaigns" />
+          <main className="flex-1">{children}</main>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

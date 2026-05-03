@@ -42,6 +42,13 @@ class Lead:
     owner_last: str = ""
     owner_source: str = ""
     email: str = ""
+    # Personalization (post-FindyMail). Empty string means "not run yet".
+    x_project: str = ""
+    y_detail: str = ""
+    y_source: str = ""               # "website_gallery" | "yelp_photo" | ""
+    linkedin_url: str = ""
+    linkedin_source: str = ""        # "web_search" | ""
+    personalization_status: str = "" # "ok" | "no_gallery" | "vision_failed" | "no_email_skip"
 
 
 @dataclass
@@ -103,6 +110,12 @@ class CampaignState:
                 "owner_last": l.owner_last,
                 "owner_source": l.owner_source,
                 "email": l.email,
+                "x_project": l.x_project,
+                "y_detail": l.y_detail,
+                "y_source": l.y_source,
+                "linkedin_url": l.linkedin_url,
+                "linkedin_source": l.linkedin_source,
+                "personalization_status": l.personalization_status,
             }
             for l in self.leads
         ]
@@ -129,6 +142,12 @@ class CampaignState:
                 owner_last=r["owner_last"],
                 owner_source=r["owner_source"],
                 email=r["email"],
+                x_project=r.get("x_project", "") or "",
+                y_detail=r.get("y_detail", "") or "",
+                y_source=r.get("y_source", "") or "",
+                linkedin_url=r.get("linkedin_url", "") or "",
+                linkedin_source=r.get("linkedin_source", "") or "",
+                personalization_status=r.get("personalization_status", "") or "",
             )
             for r in lead_rows
         ]

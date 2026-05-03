@@ -260,6 +260,69 @@ One task per finding, frequency-ordered, TDD-enforced, code-reviewed.
 - **2.AD-7 Dedup threshold tuning** in `agents/sourcer.py` if `dedup-missed-duplicate` or `dedup-false-merge` findings appear.
 - **2.LE LLM email extractor (Haiku):** trigger `email-missing` >20% of leads_with_known_website.
 
+### Task 2.KW — Keyword noise tightening (smoke finding: 7 occurrences)
+
+Replace bare "kitchen" keyword rotation in both source adapters with terms that don't match food businesses.
+
+**Files:** `agents/sources/azure_maps.py`, `agents/sources/yelp_fusion.py`
+
+**Azure keywords** (replace `_KEYWORDS_BY_NICHE["kitchen remodelers"]`):
+- `"kitchen and bath remodeling"`, `"kitchen cabinet installation"`, `"bathroom remodeling"`
+
+**Yelp terms** (replace `_TERMS_BY_NICHE["kitchen remodelers"]`, drop `None`):
+- `"kitchen and bath remodeling"`, `"kitchen cabinet installation"`, `"bathroom remodeling"`, `"home remodeling contractor"`
+
+No logic changes — dict values only. No new tests needed (existing tests mock HTTP layer).
+Verify with a count=5 run: food businesses should no longer appear in sourced results.
+
+### Task 2.CD — Cross-run dedup cache (prevents re-sourcing same businesses across campaigns)
+
+**New file: `agents/leads_cache.py`** — SQLite-backed seen-leads store.
+
+Two public functions:
+- `filter_unseen(leads, city, state_abbr, ttl_days) -> list[dict]` — returns only leads not in cache within TTL
+- `mark_seen(leads, city, state_abbr, campaign_id)` — upserts new leads into cache
+
+**DB:** `state/leads_cache.db` (auto-created, add to `.gitignore`)
+
+Schema:
+```sql
+CREATE TABLE seen_leads (
+    source        TEXT NOT NULL,
+    source_id     TEXT NOT NULL,
+    business_name TEXT NOT NULL,
+    city          TEXT NOT NULL,
+    state_abbr    TEXT NOT NULL,
+    first_seen    TEXT NOT NULL,   -- ISO date YYYY-MM-DD
+    campaign_id   TEXT NOT NULL,
+    PRIMARY KEY (source, source_id)
+)
+```
+
+**Modified: `agents/sourcer.py`** — after `_dedupe_cross_source`, before `_enrich_websites`:
+```python
+deduped = leads_cache.filter_unseen(deduped, state.city, state.state_abbr, CONFIG.leads_cache_ttl_days)
+```
+After `state.leads.append(...)` loop:
+```python
+leads_cache.mark_seen(deduped[:state.target_count], state.city, state.state_abbr, state.campaign_id)
+```
+
+**Modified: `config.py`** — add two fields:
+```python
+leads_cache_ttl_days: int = 30
+leads_cache_path: str = "state/leads_cache.db"
+```
+
+If cache filtering causes sourcer to fall short of `target_count`, log a warning with how many uncached leads were found.
+
+**Tests (TDD — all in `tests/test_leads_cache.py`):**
+1. `filter_unseen` returns all leads when cache is empty
+2. `filter_unseen` drops leads seen within TTL
+3. `filter_unseen` keeps leads seen outside TTL (expired)
+4. `mark_seen` writes correctly; second call on same lead is a no-op (upsert)
+5. Sourcer integration: second run on same city returns 0 leads (all cached)
+
 Cost-discipline gate on every task.
 
 ---

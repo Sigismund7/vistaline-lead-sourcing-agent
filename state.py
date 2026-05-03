@@ -66,7 +66,11 @@ class CampaignState:
     created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
 
     def save(self) -> None:
-        """Upsert the campaign summary row to Supabase."""
+        """Upsert the campaign summary row to Supabase.
+
+        Non-fatal when Supabase credentials are not configured — lets local
+        runs proceed without a database connection.
+        """
         kept = [l for l in self.leads if l.kept]
         payload: dict = {
             "id": self.campaign_id,
@@ -85,14 +89,18 @@ class CampaignState:
         }
         if self.status == "completed":
             payload["completed_at"] = datetime.utcnow().isoformat()
-        _db().table("campaigns").upsert(payload).execute()
+        try:
+            _db().table("campaigns").upsert(payload).execute()
+        except Exception as exc:
+            print(f"[state] save failed (non-fatal): {exc}")
 
     def save_leads(self) -> None:
-        """Replace all leads for this campaign in Supabase. Call after pipeline completes."""
+        """Replace all leads for this campaign in Supabase. Call after pipeline completes.
+
+        Non-fatal when Supabase credentials are not configured.
+        """
         if not self.leads:
             return
-        db = _db()
-        db.table("leads").delete().eq("campaign_id", self.campaign_id).execute()
         rows = [
             {
                 "campaign_id": self.campaign_id,
@@ -119,7 +127,12 @@ class CampaignState:
             }
             for l in self.leads
         ]
-        db.table("leads").insert(rows).execute()
+        try:
+            db = _db()
+            db.table("leads").delete().eq("campaign_id", self.campaign_id).execute()
+            db.table("leads").insert(rows).execute()
+        except Exception as exc:
+            print(f"[state] save_leads failed (non-fatal): {exc}")
 
     @classmethod
     def load(cls, campaign_id: str) -> "CampaignState":

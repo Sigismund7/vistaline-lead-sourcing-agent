@@ -71,6 +71,11 @@ class Config:
     # is conservative — calibrate during smoke testing if needed.
     dedup_match_threshold: int = 85
 
+    # ---- Personalizer (post-FindyMail X/Y + LinkedIn) ----
+    personalizer_max_parallel: int = 4
+    personalizer_vision_model: str = "claude-sonnet-4-20250514"
+    personalizer_screenshot_timeout_s: int = 25
+
 
 CONFIG = Config(
     anthropic_key=_require("ANTHROPIC_API_KEY"),

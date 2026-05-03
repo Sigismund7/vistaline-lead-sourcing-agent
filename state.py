@@ -1,27 +1,32 @@
 """Campaign state — single object that flows through every agent.
 
-State is auto-persisted to disk after each step. If anything crashes,
-resume by passing --resume <campaign_id> to run.py.
+State persists to Supabase after each step. Resume a crashed run:
+    python run.py --resume <campaign_id>
 """
 from __future__ import annotations
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
-import json
 import uuid
+import os
+
+from supabase import create_client, Client as SupabaseClient
 
 
-STATE_DIR = Path(__file__).parent / "state"
-STATE_DIR.mkdir(exist_ok=True)
+def _db() -> SupabaseClient:
+    """New Supabase client per call — safe to use from multiple threads."""
+    return create_client(
+        os.environ["SUPABASE_URL"],
+        os.environ["SUPABASE_SERVICE_ROLE_KEY"],
+    )
 
 
 @dataclass
 class Lead:
     """One lead as it evolves through the pipeline.
 
-    Sourcer fills:    business_name, phone, website, address, area_code, domain, place_id
-    Lead filter fills: kept, reject_reason
-    Owner researcher fills: owner_full_name, owner_first, owner_last, owner_source, email (if found in Phase 1)
+    Sourcer fills:          business_name, phone, website, address, area_code, domain, place_id
+    Lead filter fills:      kept, reject_reason
+    Owner researcher fills: owner_full_name, owner_first, owner_last, owner_source, email
     """
     business_name: str = ""
     phone: str = ""
@@ -46,33 +51,122 @@ class CampaignState:
     state_abbr: str = ""
     niche: str = ""
     target_count: int = 50
+    triggered_by: str = "DG"
+    status: str = "running"
     leads: list[Lead] = field(default_factory=list)
     log: list[dict] = field(default_factory=list)
     completed_steps: list[str] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
 
-    @property
-    def path(self) -> Path:
-        return STATE_DIR / f"{self.campaign_id}.json"
-
     def save(self) -> None:
-        self.path.write_text(json.dumps(asdict(self), indent=2))
+        """Upsert the campaign summary row to Supabase."""
+        kept = [l for l in self.leads if l.kept]
+        payload: dict = {
+            "id": self.campaign_id,
+            "city": self.city,
+            "state_abbr": self.state_abbr,
+            "niche": self.niche,
+            "target_count": self.target_count,
+            "triggered_by": self.triggered_by,
+            "status": self.status,
+            "total_leads": len(self.leads),
+            "kept_leads": len(kept),
+            "with_owner": sum(1 for l in kept if l.owner_first),
+            "with_email": sum(1 for l in kept if l.email),
+            "completed_steps": self.completed_steps,
+            "created_at": self.created_at,
+        }
+        if self.status == "completed":
+            payload["completed_at"] = datetime.utcnow().isoformat()
+        _db().table("campaigns").upsert(payload).execute()
+
+    def save_leads(self) -> None:
+        """Replace all leads for this campaign in Supabase. Call after pipeline completes."""
+        if not self.leads:
+            return
+        db = _db()
+        db.table("leads").delete().eq("campaign_id", self.campaign_id).execute()
+        rows = [
+            {
+                "campaign_id": self.campaign_id,
+                "business_name": l.business_name,
+                "phone": l.phone,
+                "website": l.website,
+                "address": l.address,
+                "area_code": l.area_code,
+                "domain": l.domain,
+                "place_id": l.place_id,
+                "kept": l.kept,
+                "reject_reason": l.reject_reason,
+                "owner_full_name": l.owner_full_name,
+                "owner_first": l.owner_first,
+                "owner_last": l.owner_last,
+                "owner_source": l.owner_source,
+                "email": l.email,
+            }
+            for l in self.leads
+        ]
+        db.table("leads").insert(rows).execute()
 
     @classmethod
     def load(cls, campaign_id: str) -> "CampaignState":
-        path = STATE_DIR / f"{campaign_id}.json"
-        data = json.loads(path.read_text())
-        data["leads"] = [Lead(**l) for l in data.get("leads", [])]
-        return cls(**data)
+        db = _db()
+        row = db.table("campaigns").select("*").eq("id", campaign_id).single().execute().data
+        lead_rows = db.table("leads").select("*").eq("campaign_id", campaign_id).execute().data
+        leads = [
+            Lead(
+                business_name=r["business_name"],
+                phone=r["phone"],
+                website=r["website"],
+                address=r["address"],
+                area_code=r["area_code"],
+                domain=r["domain"],
+                place_id=r["place_id"],
+                kept=r["kept"],
+                reject_reason=r["reject_reason"],
+                owner_full_name=r["owner_full_name"],
+                owner_first=r["owner_first"],
+                owner_last=r["owner_last"],
+                owner_source=r["owner_source"],
+                email=r["email"],
+            )
+            for r in lead_rows
+        ]
+        return cls(
+            campaign_id=row["id"],
+            city=row["city"],
+            state_abbr=row["state_abbr"],
+            niche=row["niche"],
+            target_count=row["target_count"],
+            triggered_by=row.get("triggered_by", "DG"),
+            status=row.get("status", "running"),
+            leads=leads,
+            completed_steps=row.get("completed_steps") or [],
+            created_at=row["created_at"],
+        )
 
     @classmethod
-    def new(cls) -> "CampaignState":
-        return cls(campaign_id=datetime.utcnow().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6])
+    def new(cls, triggered_by: str = "DG") -> "CampaignState":
+        return cls(
+            campaign_id=datetime.utcnow().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6],
+            triggered_by=triggered_by,
+        )
 
     def info(self, agent: str, message: str, **fields) -> None:
         entry = {"ts": datetime.utcnow().isoformat(), "agent": agent, "msg": message, **fields}
         self.log.append(entry)
         print(f"[{agent}] {message}" + (f"  {fields}" if fields else ""))
+        try:
+            _db().table("events").insert({
+                "campaign_id": self.campaign_id,
+                "step": agent,
+                "level": fields.get("level", "info"),
+                "message": message,
+                "detail": fields.get("detail"),
+                "duration_ms": fields.get("duration_ms"),
+            }).execute()
+        except Exception as exc:
+            print(f"[state] event insert failed (non-fatal): {exc}")
 
     def mark_done(self, step: str) -> None:
         if step not in self.completed_steps:

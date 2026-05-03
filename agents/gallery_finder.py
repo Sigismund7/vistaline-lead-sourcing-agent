@@ -7,7 +7,7 @@ integration-tested via a smoke run, per CLAUDE.md "test against real APIs".
 """
 from __future__ import annotations
 from urllib.parse import urlparse
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout, Error
 
 
 # Heuristic: a gallery page must have at least this many <img> tags
@@ -109,8 +109,8 @@ def find_and_screenshot(
                 except PlaywrightTimeout as e:
                     print(f"[gallery_finder] WARN: timeout on {url}: {e}")
                     continue
-                except Exception as e:
-                    # Network blips, TLS errors, navigation aborts — keep walking.
+                except Error as e:
+                    # Navigation failures, page crashes, network aborts — keep walking.
                     print(f"[gallery_finder] WARN: {url}: {type(e).__name__} {e}")
                     continue
         finally:

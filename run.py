@@ -27,7 +27,80 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--niche", default=None, help='Niche, e.g. "kitchen remodeling"')
     p.add_argument("--triggered-by", default="DG", help='Who launched this run (default: DG)')
     p.add_argument("--resume", default=None, help="Resume by campaign ID")
+    p.add_argument(
+        "--personalize",
+        default=None,
+        metavar="ENRICHED_CSV",
+        help="Path to a FindyMail-returned CSV; runs personalizer + linkedin_finder, "
+             "writes final agency CSV to output/.",
+    )
+    p.add_argument(
+        "--triggered-by-name",
+        default=None,
+        help="(Personalize mode only) the Lead Sourcer name to write into the agency CSV.",
+    )
     return p.parse_args()
+
+
+def run_personalize(enriched_csv: str, *, triggered_by: str) -> int:
+    """End-to-end post-FindyMail flow: read enriched CSV -> personalizer ->
+    linkedin finder -> write final agency CSV.
+    """
+    from pathlib import Path
+    from agents import personalizer, linkedin_finder
+    from agents.csv_agency import read_enriched, write_agency
+
+    state = read_enriched(enriched_csv)
+    state.triggered_by = triggered_by or "DG"
+    state.status = "personalizing"
+    state.save()
+
+    print()
+    print(f"Personalize mode: {state.campaign_id}")
+    print(f"  enriched CSV:       {enriched_csv}")
+    print(f"  leads:              {len(state.leads)}")
+    print(f"  with email:         {sum(1 for l in state.leads if l.email)}")
+    print()
+
+    try:
+        personalizer.run(
+            state,
+            CONFIG.anthropic_key,
+            yelp_key=CONFIG.yelp_fusion_key,
+            model=CONFIG.personalizer_vision_model,
+            max_parallel=CONFIG.personalizer_max_parallel,
+            timeout_s=CONFIG.personalizer_screenshot_timeout_s,
+        )
+        linkedin_finder.run(
+            state,
+            CONFIG.anthropic_key,
+            max_parallel=CONFIG.personalizer_max_parallel,
+        )
+
+        out_dir = Path(__file__).parent / "output"
+        out_dir.mkdir(exist_ok=True)
+        agency_path = out_dir / f"{state.campaign_id}__agency.csv"
+        write_agency(state, agency_path, lead_sourcer=triggered_by)
+
+        state.save_leads()
+        state.status = "completed"
+        state.save()
+
+        ok = sum(1 for l in state.leads if l.personalization_status == "ok")
+        with_li = sum(1 for l in state.leads if l.linkedin_url)
+        print()
+        print("=" * 64)
+        print(f"  ✅ Personalization done — campaign {state.campaign_id}")
+        print(f"  X/Y filled:        {ok}/{len(state.leads)}")
+        print(f"  LinkedIn found:    {with_li}/{len(state.leads)}")
+        print(f"  agency CSV:        {agency_path}")
+        print("=" * 64)
+        return 0
+    except Exception:
+        traceback.print_exc()
+        state.status = "failed"
+        state.save()
+        return 2
 
 
 def banner(state: CampaignState) -> None:
@@ -42,6 +115,12 @@ def banner(state: CampaignState) -> None:
 
 def main() -> int:
     args = parse_args()
+
+    if args.personalize:
+        return run_personalize(
+            args.personalize,
+            triggered_by=args.triggered_by_name or args.triggered_by,
+        )
 
     if args.resume:
         state = CampaignState.load(args.resume)

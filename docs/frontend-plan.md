@@ -85,11 +85,11 @@ The CLAUDE.md invariant ("state persists after every step; every agent checks `i
 
 - **Frontend host:** Vercel
 - **Frontend stack:** Next.js 15 (App Router) + Tailwind + shadcn/ui + Radix + Geist font
-- **Backend host:** Railway (Python 3.11, FastAPI, Postgres, Redis) — *operator to confirm*
+- **Backend host:** Railway (Python 3.11, FastAPI, Postgres, Redis)
 - **Backend framework:** FastAPI + `sse-starlette` for live events + `asyncio.create_task` for pipeline runs (promote to Celery / Dramatiq later if concurrency demands it)
 - **DB:** Postgres on Railway (or Supabase if we choose Supabase Auth)
 - **Pub/sub for live events:** Redis on Railway — fans out one writer (the running pipeline) to N SSE clients per campaign
-- **Auth:** *open — see §10*
+- **Auth:** Clerk (free ≤10k MAU, Google SSO, drop-in for Next.js)
 - **CSV export:** generated on demand from DB rows; downloaded directly from frontend
 
 ---
@@ -168,16 +168,19 @@ Phase 0 must complete before Phase 2 (the engine has to work CLI-first). Phase 1
 | 2026-05-02 | Pre-export row-exclude review screen (Clay-style) | Operator approved |
 | 2026-05-02 | Living plan doc at `docs/frontend-plan.md`, append-only | Operator requested |
 | 2026-05-02 | Run-view event tone: terse system messages, not agent narrative | Pipeline is deterministic — first-person voice is wrong shape |
+| 2026-05-02 | Auth: **Clerk** | Operator pick — drop-in, free tier, Google SSO, future-proof |
+| 2026-05-02 | API keys: **shared agency keys server-side**, per-user cost caps enforced | Operator pick — Vistaline pays the bill, simpler UX, no BYOK friction |
+| 2026-05-02 | Concurrent campaigns enabled day 1 | Operator pick — teammates can run different cities simultaneously |
+| 2026-05-02 | Cost caps: **soft warning at $10/run, hard abort at $25/run, both configurable** | Operator pick — soft warning is minimal interrupt; hard abort protects against runaway spend |
+| 2026-05-02 | Backend host: **Railway** (locked, not Vercel) | Vercel functions cap at 15 min and don't fit long-running stateful Python pipelines with SSE; Railway Hobby ~$5/month is the cheapest viable option |
+| 2026-05-02 | Headline font: **Geist** (v0 default) confirmed | Operator confirmed — site uses v0, internal tool inherits same font |
+| 2026-05-02 | Single-tenant data model — internal Vistaline team only, forever | Operator confirmed — no org/tenant boundaries needed; saves schema complexity |
+| 2026-05-02 | Visual polish: production-quality internal-tool aesthetic (Linear/Vercel/Resend density) | Operator: "internal tool forever, but might as well make it look decent" |
 
 ---
 
-## 10. Open questions (need operator answers)
+## 10. Open questions (remaining — non-blocking for Phase 1)
 
-1. **Auth model.** Options: **Clerk** (drop-in, free ≤10k MAU, Google SSO out of the box — recommended), Supabase Auth (free tier, bundles with DB), NextAuth + Resend magic link (free, more wiring), or shared team password (weakest).
-2. **API keys.** Shared agency credentials server-side with per-user cost cap (recommended) **OR** each teammate brings their own (BYOK)?
-3. **Concurrent campaigns.** Day 1: two teammates running different cities simultaneously (recommended), or one-at-a-time queue?
-4. **Cost cap behavior.** Soft warning at $5/run + hard abort at $20/run + both configurable (recommended)? Or different defaults? Or no cap?
-5. **Backend host.** Railway (recommended — Python + Postgres + Redis on one bill, git-push deploys), Fly.io (more control, more setup), or Render (similar to Railway)?
-6. **Brand confirmations.** (a) Exact primary-blue hex — is `#2563EB` correct? (b) Headline font — confirm Geist? (c) Logo SVG/PNG file from operator.
-7. **Domain.** `tool.vistalinedigital.com`, `app.vistalinedigital.com`, or separate? Affects Vercel deploy config and Clerk allowed origins.
-8. **Client-facing eventually?** Even if v1 is internal, knowing now whether clients will eventually log in changes the data model (org/tenant boundaries, lead ownership) and billing surface. Confirm v1 scope.
+1. **Exact primary-blue hex.** Provisional `#2563EB` (Tailwind `blue-600`). Will verify against the site when the first screen renders in Phase 1; trivial to swap. Operator can drop a precise hex into this section anytime.
+2. **Logo file.** Operator to drop SVG and/or PNG at `docs/brand/logo.svg` (and `logo-mark.svg` if separate symbol exists). Until then, the header renders the wordmark as text using Geist heavy + the primary blue.
+3. **Production domain.** Defaulting to `app.vistalinedigital.com` (SaaS convention). Vercel domain can be reconfigured anytime; only affects Clerk allowed-origin list.

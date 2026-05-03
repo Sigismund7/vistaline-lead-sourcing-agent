@@ -25,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--state", help='State abbreviation, e.g. "FL"')
     p.add_argument("--count", type=int, default=50, help="Lead count target (default: 50)")
     p.add_argument("--niche", default=None, help='Niche, e.g. "kitchen remodeling"')
+    p.add_argument("--triggered-by", default="DG", help='Who launched this run (default: DG)')
     p.add_argument("--resume", default=None, help="Resume by campaign ID")
     return p.parse_args()
 
@@ -55,6 +56,7 @@ def main() -> int:
         state.state_abbr = args.state.upper()
         state.niche = args.niche or CONFIG.default_niche
         state.target_count = args.count
+        state.triggered_by = args.triggered_by
         print(f"New campaign: {state.campaign_id}")
 
     state.save()
@@ -72,6 +74,9 @@ def main() -> int:
 
         # 4. CSV assembler — FindyMail-ready + master
         findymail_path, master_path = csv_assembler.run(state)
+
+        # Persist all leads to Supabase so the web UI can show and export them.
+        state.save_leads()
 
         # Summary stats
         total = len(state.leads)
@@ -96,6 +101,8 @@ def main() -> int:
 
     except Exception:
         traceback.print_exc()
+        state.status = "failed"
+        state.save()
         print()
         print(f"💥  Crashed mid-run. Resume with:")
         print(f"    python run.py --resume {state.campaign_id}")

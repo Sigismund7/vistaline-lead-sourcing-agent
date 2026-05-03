@@ -145,7 +145,7 @@ export default function ResultsPage({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-10"></TableHead>
+              <TableHead className="w-10"><span className="sr-only">Include</span></TableHead>
               <TableHead>Business</TableHead>
               <TableHead>Owner</TableHead>
               <TableHead>Phone</TableHead>

@@ -130,7 +130,7 @@ export default function CampaignsPage() {
                 <TableHead className="text-right">Email</TableHead>
                 <TableHead className="text-right">Spend</TableHead>
                 <TableHead>When</TableHead>
-                <TableHead></TableHead>
+                <TableHead><span className="sr-only">Actions</span></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

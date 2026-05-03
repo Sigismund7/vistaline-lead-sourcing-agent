@@ -1,56 +1,74 @@
 "use client";
 
-import { use, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Download, ExternalLink, Mail, Phone, Search } from "lucide-react";
+import { Download, ExternalLink, Mail, Phone, Search, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { MOCK_CAMPAIGNS } from "@/lib/mocks/campaigns";
-import { MOCK_LEADS } from "@/lib/mocks/leads";
+import { getCampaign, getLeads, patchLead, csvUrl } from "@/lib/api";
+import type { Campaign, Lead } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export default function ResultsPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default function ResultsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const campaign = MOCK_CAMPAIGNS.find((c) => c.id === id) ?? MOCK_CAMPAIGNS[0];
 
-  const [excluded, setExcluded] = useState<Set<string>>(
-    () => new Set(MOCK_LEADS.filter((l) => l.excludedByUser).map((l) => l.id)),
-  );
+  const [campaign, setCampaign] = useState<Campaign | null>(null);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([getCampaign(id), getLeads(id)])
+      .then(([c, l]) => {
+        if (cancelled) return;
+        setCampaign(c);
+        setLeads(l);
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [id]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return MOCK_LEADS.filter((l) => {
-      if (!q) return true;
-      return (
+    if (!q) return leads;
+    return leads.filter(
+      (l) =>
         l.businessName.toLowerCase().includes(q) ||
         l.address.toLowerCase().includes(q) ||
         l.ownerFirst.toLowerCase().includes(q) ||
-        l.ownerLast.toLowerCase().includes(q)
+        l.ownerLast.toLowerCase().includes(q),
+    );
+  }, [leads, search]);
+
+  function toggle(lead: Lead) {
+    const next = !lead.excludedByUser;
+    setLeads((prev) =>
+      prev.map((l) => (l.id === lead.id ? { ...l, excludedByUser: next } : l)),
+    );
+    patchLead(id, lead.id, next).catch(() => {
+      setLeads((prev) =>
+        prev.map((l) => (l.id === lead.id ? { ...l, excludedByUser: lead.excludedByUser } : l)),
       );
     });
-  }, [search]);
-
-  const kept = MOCK_LEADS.filter((l) => l.kept);
-  const ready = kept.filter((l) => !excluded.has(l.id));
-  const withEmail = ready.filter((l) => l.email).length;
-
-  function toggle(id: string) {
-    setExcluded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-32 text-muted-foreground">
+        <Loader2 className="mr-2 size-5 animate-spin" /> Loading results…
+      </div>
+    );
+  }
+
+  const kept = leads.filter((l) => l.kept);
+  const ready = kept.filter((l) => !l.excludedByUser);
+  const withEmail = ready.filter((l) => l.email).length;
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-10">
@@ -62,27 +80,31 @@ export default function ResultsPage({
             </Link>
             <span className="text-muted-foreground">/</span>
             <Link
-              href={`/campaigns/${campaign.id}`}
+              href={`/campaigns/${id}`}
               className="text-sm font-mono text-muted-foreground hover:text-foreground"
             >
-              {campaign.id.slice(0, 14)}
+              {id.slice(0, 14)}
             </Link>
             <span className="text-muted-foreground">/</span>
             <span className="text-sm">results</span>
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">
-            Results · {campaign.city}, {campaign.stateAbbr}
+            Results{campaign ? ` · ${campaign.city}, ${campaign.stateAbbr}` : ""}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Review and trim before exporting to FindyMail. Unchecked rows won&apos;t be included.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline">
-            <Download className="mr-2 size-4" /> Download master CSV
+          <Button asChild variant="outline">
+            <a href={csvUrl(id, "master")} download>
+              <Download className="mr-2 size-4" /> Master CSV
+            </a>
           </Button>
-          <Button>
-            <Download className="mr-2 size-4" /> Download FindyMail CSV
+          <Button asChild>
+            <a href={csvUrl(id, "findymail")} download>
+              <Download className="mr-2 size-4" /> FindyMail CSV
+            </a>
           </Button>
         </div>
       </div>
@@ -94,7 +116,7 @@ export default function ResultsPage({
             <CardTitle className="text-2xl">{ready.length}</CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground">
-            {withEmail} already have an email captured · saves that many FindyMail credits
+            {withEmail} already have an email · saves that many FindyMail credits
           </CardContent>
         </Card>
         <Card>
@@ -102,26 +124,22 @@ export default function ResultsPage({
             <CardDescription>Kept by filter</CardDescription>
             <CardTitle className="text-2xl">{kept.length}</CardTitle>
           </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">
-            of {MOCK_LEADS.length} sourced
-          </CardContent>
+          <CardContent className="text-xs text-muted-foreground">of {leads.length} sourced</CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Excluded by you</CardDescription>
-            <CardTitle className="text-2xl">{excluded.size}</CardTitle>
+            <CardTitle className="text-2xl">{leads.filter((l) => l.excludedByUser).length}</CardTitle>
           </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">
-            uncheck to add back
-          </CardContent>
+          <CardContent className="text-xs text-muted-foreground">uncheck to add back</CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Total spend</CardDescription>
-            <CardTitle className="text-2xl">${campaign.spendUsd.toFixed(2)}</CardTitle>
+            <CardTitle className="text-2xl">${campaign?.spendUsd.toFixed(2) ?? "—"}</CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground">
-            Anthropic + source APIs · ${(campaign.spendUsd / Math.max(kept.length, 1)).toFixed(3)}/lead
+            Anthropic + source APIs
           </CardContent>
         </Card>
       </div>
@@ -137,7 +155,7 @@ export default function ResultsPage({
           />
         </div>
         <div className="text-xs text-muted-foreground">
-          showing {filtered.length} of {MOCK_LEADS.length}
+          showing {filtered.length} of {leads.length}
         </div>
       </div>
 
@@ -156,20 +174,18 @@ export default function ResultsPage({
           </TableHeader>
           <TableBody>
             {filtered.map((lead) => {
-              const isExcluded = excluded.has(lead.id);
+              const isExcluded = lead.excludedByUser;
               const isFiltered = !lead.kept;
               return (
                 <TableRow
                   key={lead.id}
-                  className={cn(
-                    (isExcluded || isFiltered) && "opacity-50",
-                  )}
+                  className={cn((isExcluded || isFiltered) && "opacity-50")}
                 >
                   <TableCell>
                     <Checkbox
                       checked={lead.kept && !isExcluded}
                       disabled={!lead.kept}
-                      onCheckedChange={() => toggle(lead.id)}
+                      onCheckedChange={() => toggle(lead)}
                       aria-label={`Include ${lead.businessName}`}
                     />
                   </TableCell>
@@ -177,9 +193,7 @@ export default function ResultsPage({
                     <div className="font-medium">{lead.businessName}</div>
                     <div className="text-xs text-muted-foreground">{lead.address}</div>
                     {isFiltered && (
-                      <div className="mt-1 text-xs text-danger">
-                        Filtered: {lead.rejectReason}
-                      </div>
+                      <div className="mt-1 text-xs text-danger">Filtered: {lead.rejectReason}</div>
                     )}
                   </TableCell>
                   <TableCell>
@@ -195,19 +209,19 @@ export default function ResultsPage({
                     )}
                   </TableCell>
                   <TableCell className="font-mono text-xs">
-                    <a href={`tel:${lead.phone}`} className="inline-flex items-center gap-1 hover:text-foreground">
-                      <Phone className="size-3" />
-                      {lead.phone}
-                    </a>
+                    {lead.phone ? (
+                      <a href={`tel:${lead.phone}`} className="inline-flex items-center gap-1 hover:text-foreground">
+                        <Phone className="size-3" />
+                        {lead.phone}
+                      </a>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
                   </TableCell>
                   <TableCell className="text-xs">
                     {lead.website ? (
-                      <a
-                        href={lead.website}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-                      >
+                      <a href={lead.website} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
                         <ExternalLink className="size-3" />
                         {lead.domain}
                       </a>
@@ -218,8 +232,7 @@ export default function ResultsPage({
                   <TableCell className="text-xs">
                     {lead.email ? (
                       <span className="inline-flex items-center gap-1 text-success">
-                        <Mail className="size-3" />
-                        captured
+                        <Mail className="size-3" /> captured
                       </span>
                     ) : (
                       <span className="text-muted-foreground">needs FindyMail</span>
@@ -227,17 +240,11 @@ export default function ResultsPage({
                   </TableCell>
                   <TableCell>
                     {isFiltered ? (
-                      <Badge variant="outline" className="border-danger/30 bg-danger/10 text-danger">
-                        filtered
-                      </Badge>
+                      <Badge variant="outline" className="border-danger/30 bg-danger/10 text-danger">filtered</Badge>
                     ) : isExcluded ? (
-                      <Badge variant="outline" className="border-warning/30 bg-warning/10 text-warning">
-                        excluded
-                      </Badge>
+                      <Badge variant="outline" className="border-warning/30 bg-warning/10 text-warning">excluded</Badge>
                     ) : (
-                      <Badge variant="outline" className="border-success/30 bg-success/10 text-success">
-                        ready
-                      </Badge>
+                      <Badge variant="outline" className="border-success/30 bg-success/10 text-success">ready</Badge>
                     )}
                   </TableCell>
                 </TableRow>

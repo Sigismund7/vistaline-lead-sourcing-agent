@@ -11,7 +11,7 @@ Produces a FindyMail-ready leads CSV for a single US city. Sources local remodel
 | Cross-run dedup | `leads_cache` — SQLite, 30-day TTL per city |
 | Website discovery | `website_finder` — Brave search + HEAD validation |
 | Filter & clean | `lead_filter` — Claude Haiku, SOP rules, batches of 25 |
-| Owner name lookup | `owner_researcher` — two-phase, parallel × 10 |
+| Owner name lookup | `owner_researcher` — three-phase + eponymous heuristic, parallel × 10 |
 | FindyMail upload CSV | `csv_assembler` |
 
 What's still manual on purpose: the FindyMail upload itself, all personalization, Clipio thumbnails, Instantly setup, and launch. This system delivers the input file you drop into FindyMail.
@@ -31,9 +31,14 @@ run.py (orchestrator — deterministic Python, no LLM)
   │
   ├── agents/lead_filter.py            Claude Haiku — SOP filter rules
   │
-  ├── agents/owner_researcher.py       Two-phase owner lookup, parallel × 10
-  │     ├── website_crawler.py         Phase 1: direct HTTP + BeautifulSoup (free)
-  │     └── (Claude + web_search)      Phase 2: BBB / Google fallback
+  ├── agents/owner_researcher.py       Three-phase owner lookup, parallel × 10
+  │     ├── (eponymous name heuristic) Phase 0: free pre-check (e.g. "Andrew Roby")
+  │     ├── sources/owners/website.py  Phase 1: direct HTTP + Claude Sonnet (free)
+  │     ├── sources/owners/opencorporates.py
+  │     │                              Phase 2: OpenCorporates officer API (free tier)
+  │     └── sources/owners/websearch.py
+  │                                    Phase 3: BBB + Houzz + Google + review responses
+  │                                             via Claude web_search (~$0.05/lead)
   │
   └── agents/csv_assembler.py          FindyMail CSV + master audit CSV
 ```
@@ -67,17 +72,23 @@ Each batch returns a `KEEP`/`REJECT` verdict with a reason. Rejected leads still
 
 ### Owner research layer
 
-For every kept lead, two phases run in order with an early-exit when Phase 1 fully resolves the lead.
+For every kept lead, phases run in order with early-exit on the first high/medium-confidence result.
+
+**Phase 0 — eponymous name heuristic (free, no API).**
+Before any network call, the business name itself is checked against a tight pattern: exactly two title-cased alphabetic words, neither all-caps (rules out acronyms like RRH/JFK), neither matching a blocklist of trade words (`construction`, `kitchen`, `design`, `the`, etc.). Catches contractors named after their owner — "Andrew Roby", "Bob Jones" — at zero cost. Returns `confidence=medium`.
 
 **Phase 1 — website crawl (free).**
 Fetches the homepage, finds links to About / Team / Meet / Owner / Founder / Contact sub-pages on the same domain, fetches up to 5 of them, and sends the extracted text to Claude Sonnet. Claude applies SOP rules to find the owner's name and — when a direct owner email is visible on the site — captures that too. Generic `info@` / `contact@` addresses are rejected. When Phase 1 returns both name AND email, the lead is fully resolved without FindyMail spending a credit.
 
-**Phase 2 — BBB + Google web search.**
-Only runs when Phase 1 returns no confident name. Uses Claude with `web_search` to hit the BBB listing first, then falls back to Google. Produces a name only.
+**Phase 2 — OpenCorporates registry (free tier).**
+A pure REST API call to OpenCorporates' v0.4 endpoint, looking up the company by name + state jurisdiction (`us_wi`, `us_nc`, etc.) and pulling the highest-priority current officer (Owner > President > CEO > Principal > Founder > Manager > Director). Free unauthenticated tier is 50 lookups/day; an `OPENCORPORATES_API_KEY` env var lifts that limit. Silent fallthrough on 429, no results, or matching officer not found — most coverage gaps here are sole proprietors and single-member LLCs that simply aren't in any state registry.
+
+**Phase 3 — web search fallback (~$0.05/lead).**
+Only runs when phases 0–2 return no confident name. Uses Claude with `web_search` to try, in order: BBB principal listing, Houzz profile via `site:houzz.com`, Google "owner" search, Google review responses ("Thanks — John, Owner" / "John and his team"), Google "founder" search. Confidence scoring distinguishes full-name-with-title (high) from first-name-only signed reviews (medium). `max_uses=7` per lead.
 
 **Per-lead checkpointing.** Each result is applied to the lead immediately as its future completes (not in a post-loop batch). `state.save_leads()` is called after every completion so `--resume` skips already-researched leads. A mid-batch crash loses at most one in-flight result, not the entire batch.
 
-Typical hit rate: ~70–80% combined.
+Typical hit rate varies sharply by market: ~50% in metros dominated by kitchen/bath showrooms and design-build firms (Charlotte), ~75–90% in smaller markets dominated by sole-proprietor remodelers.
 
 ---
 
@@ -95,10 +106,10 @@ cp .env.example .env
 | Key | Where to get it |
 |---|---|
 | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
-| `GOOGLE_PLACES_KEY` | [console.cloud.google.com](https://console.cloud.google.com) — Places API (New), billing enabled |
 | `AZURE_MAPS_KEY` | Azure Portal → Azure Maps account → Authentication |
 | `YELP_FUSION_KEY` | [fusion.yelp.com](https://fusion.yelp.com) → Create app → API key |
 | `BRAVE_SEARCH_KEY` | [api.search.brave.com](https://api.search.brave.com) — Free tier: 2,000 queries/month |
+| `OPENCORPORATES_API_KEY` | Optional. [opencorporates.com/api_accounts/new](https://opencorporates.com/api_accounts/new) — Phase 2 falls back to the unauthenticated 50/day tier when blank |
 
 Optional (needed for the web UI and Railway backend):
 
@@ -168,7 +179,7 @@ Only includes kept leads that have both an owner name and a domain.
 
 **Lead filter (Claude Haiku)** is the cheap step. 50 leads batched into 2 groups of 25, each prompt ~2,000 tokens. Total: ~4,000 input tokens → less than $0.01. Haiku is used here deliberately — it's fast, cheap, and the classification task doesn't need Sonnet reasoning.
 
-**Owner researcher (Claude Sonnet)** is where most of the spend lives. Each lead that reaches Phase 1 gets a prompt containing up to 5 scraped web pages (~5,000–15,000 tokens). Of the ~75–80% of leads where Phase 1 succeeds, that's roughly 40 Sonnet calls. Leads that fall to Phase 2 (BBB/Google web search) add another ~2,000 tokens each for the tool-use round-trip. A 50-lead campaign with a ~75% Phase 1 hit rate runs about 38 Phase 1 calls + 12 Phase 2 calls, totalling roughly 200,000–400,000 input tokens → **$0.30–$0.75**.
+**Owner researcher (Claude Sonnet)** is where most of the spend lives. Phase 0 (eponymous heuristic) is free. Phase 1 (website crawl) is one Sonnet call with up to 5 scraped pages (~5,000–15,000 tokens) per lead. Phase 2 (OpenCorporates) is free. Phase 3 only fires for leads that escape phases 0–2 and adds ~2,000 tokens per lead for the `web_search` tool round-trips (`max_uses=7`). A 50-lead campaign with a typical ~50% Phase 1 hit rate runs about 25 Phase 1 calls + 10 Phase 3 calls, totalling roughly 200,000–400,000 input tokens → **$0.30–$0.75**.
 
 **Brave Web Search** (website finder) fires once per lead that arrives with no website from the sourcer. In practice that's 20–40% of leads — maybe 15–25 queries per campaign. Well within the 2,000/month free tier for any reasonable campaign cadence.
 
@@ -188,7 +199,7 @@ In practice: the first run for a city costs $0.35–$0.85. A re-run two weeks la
 
 ## Known limits
 
-- **Owner hit rate ~70–80%.** JS-only sites (Wix, single-page React apps) won't yield readable text — those fall to Phase 2. Leads with no confident name from either phase are excluded from the FindyMail CSV but visible in the master CSV.
+- **Owner hit rate is market-dependent.** Smaller metros with sole-proprietor remodelers see 75–90%. Metros dominated by kitchen/bath showrooms and design-build firms can drop to 40–55% — those operations rarely list individual owners anywhere public. JS-only sites (Wix, single-page React apps) won't yield readable text and fall through to Phase 3. Leads with no confident name are excluded from the FindyMail CSV but visible in the master CSV.
 - **Azure Maps and Yelp cap at ~50 results per query.** 3–4 keyword variants per niche are used to widen coverage.
 - **Cross-run dedup TTL is 30 days.** Configurable via `leads_cache_ttl_days` in `config.py`.
 - **Brave free tier is 2,000 queries/month.** A budget guard in `config.py` caps usage; website finder degrades gracefully when the cap is hit.
@@ -210,5 +221,6 @@ See [`frontend/AGENTS.md`](frontend/AGENTS.md) for frontend setup and deploy ins
 ## Further reading
 
 - [`docs/plan-tightening-v1.md`](docs/plan-tightening-v1.md) — Phase 2 quality improvements: keyword noise fix, website blocklist, cross-run dedup, owner research checkpointing
-- [`docs/superpowers/specs/2026-05-04-owner-researcher-v2-design.md`](docs/superpowers/specs/2026-05-04-owner-researcher-v2-design.md) — Planned v2 owner researcher with Houzz scrape + OpenCorporates registry (target hit rate ~92–95%)
+- [`docs/superpowers/specs/2026-05-04-owner-researcher-v2-design.md`](docs/superpowers/specs/2026-05-04-owner-researcher-v2-design.md) — Owner researcher v2 design (shipped 2026-05-04). Note: the original Houzz direct-scrape phase was replaced with a `site:houzz.com` search inside Phase 3 after Houzz's SPA proved unscrapable.
+- [`docs/superpowers/specs/2026-05-04-lead-stage-tracking-design.md`](docs/superpowers/specs/2026-05-04-lead-stage-tracking-design.md) — Planned: per-lead lifecycle stages (`researched → exported → processed`) so unfinished campaigns are visible at a glance.
 - [`docs/superpowers/plans/`](docs/superpowers/plans/) — Implementation plans for each development phase

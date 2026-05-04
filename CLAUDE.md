@@ -77,9 +77,49 @@ When I ask for a new feature, default to:
 - "Switch model" — change `claude-sonnet-4-20250514` to a newer model in the agent files
 - "Add Notion logging" — write a campaign summary back to a Notion page after a successful run
 
+## Frontend (Next.js UI)
+
+The `frontend/` directory is a Next.js 16 app deployed on Vercel. **Read `frontend/AGENTS.md` before touching any Next.js code** — this version has breaking API changes from prior versions.
+
+**Live URL:** `https://frontend-9qqfxnitg-daschelgorgenyi-vistalinedigs-projects.vercel.app`
+
+**Backend (Railway):** `https://vistaline-lead-sourcing-agent-production.up.railway.app`
+
+**Auth:** Cookie-based, no external service. `frontend/proxy.ts` checks an httpOnly `session` cookie on every request. Login at `/login`, credentials validated in `frontend/app/api/auth/login/route.ts` against `AUTH_USERNAME`/`AUTH_PASSWORD` env vars.
+
+- Why not Clerk: `proxy.ts` (Next.js 16) runs Node.js runtime; Clerk only supports Edge Runtime — it silently did nothing.
+- Why not `middleware.ts`: Next.js 16 renamed it to `proxy.ts`.
+
+**Deploying:** Use Vercel CLI from `frontend/` — GitHub integration is blocked on Hobby plan for commits from non-member authors.
+
+```bash
+cd frontend
+npx vercel --prod --yes
+```
+
+**Required env vars on Vercel:** `AUTH_USERNAME`, `AUTH_PASSWORD`, `SESSION_SECRET`, `NEXT_PUBLIC_API_URL`, `VISTALINE_API_SECRET`. After changing env vars, redeploy is required.
+
 ## Anti-patterns I've already rejected
 
 - Agentic orchestrator (LLM deciding what to do next at the run.py level) — overkill for a deterministic pipeline
 - Direct browser scraping of Google Maps via Playwright — breaks too often, Places API is cheaper and more reliable
 - OpenClaw or similar agent frameworks — adds abstraction without adding value for this scope
 - Mocking external APIs in tests — too brittle, tests against real APIs at small `--count`
+
+## Skill routing
+
+When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.
+
+Key routing rules:
+- Product ideas/brainstorming → invoke /office-hours
+- Strategy/scope → invoke /plan-ceo-review
+- Architecture → invoke /plan-eng-review
+- Design system/plan review → invoke /design-consultation or /plan-design-review
+- Full review pipeline → invoke /autoplan
+- Bugs/errors → invoke /investigate
+- QA/testing site behavior → invoke /qa or /qa-only
+- Code review/diff check → invoke /review
+- Visual polish → invoke /design-review
+- Ship/deploy/PR → invoke /ship or /land-and-deploy
+- Save progress → invoke /context-save
+- Resume context → invoke /context-restore

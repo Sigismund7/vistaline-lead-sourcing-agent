@@ -31,35 +31,50 @@ MAX_PARALLEL = 10  # I/O-bound; each worker constructs its own Anthropic client.
 # Uniform phase signature
 PhaseFn = Callable[[Lead, str, str, str], dict]
 
-# Words that disqualify a business name from being an eponymous person name.
-_BUSINESS_WORDS = frozenset({
-    "construction", "design", "build", "remodel", "remodeling", "kitchen",
-    "bath", "home", "services", "group", "associates", "partners", "inc",
-    "llc", "ltd", "corp", "company", "co", "tile", "flooring", "cabinets",
-    "interior", "exterior", "builders", "contractor", "contractors",
-    "improvement", "improvements", "renovation", "renovations", "concepts",
-    "solutions", "studio", "projects", "properties", "management",
+# Words that disqualify a token from being part of a person's name.
+_NON_NAME_WORDS = frozenset({
+    # Articles / determiners
+    "the", "a", "an",
+    # Business entity suffixes
+    "inc", "llc", "ltd", "corp", "company", "co",
+    # Trade / service words
+    "construction", "design", "build", "remodel", "remodeling", "renovation",
+    "renovations", "builder", "builders", "contractor", "contractors",
+    "improvement", "improvements", "services", "service", "solutions",
+    "concepts", "studio", "projects", "properties", "management",
+    "kitchen", "bath", "tile", "flooring", "cabinets", "cabinet",
+    "interior", "exterior", "home", "homes", "house",
+    # Generic descriptor words that appear in business names
+    "group", "associates", "partners", "team", "guys", "brothers",
+    "general", "level", "next", "top", "best", "pro", "new", "old",
+    "classic", "modern", "custom", "premier", "elite", "quality",
+    "advanced", "professional", "professionals", "expert", "experts",
+    "master", "masters", "local", "national", "american", "total",
+    "complete", "all", "first", "premier",
 })
 
 
 def _eponymous_owner(business_name: str) -> str | None:
-    """Return the business name as an owner name if it looks like 'First Last'.
+    """Return 'First Last' if the business name is clearly a person's name.
 
-    Catches businesses like 'Andrew Roby' or 'John Smith Remodeling' where
-    the first two words are clearly a person's name and not business keywords.
-    Returns None if the name doesn't fit the pattern.
+    Requires exactly two words, both purely alphabetic, title-cased, neither
+    all-caps (rules out acronyms like RRH or JFK), and neither matching the
+    non-name word list. Returns None in all other cases.
     """
     words = business_name.strip().split()
-    if len(words) < 2:
+    if len(words) != 2:
         return None
     first, last = words[0], words[1]
-    # Both words must be purely alphabetic, capitalized, and not business jargon.
-    if not (first.isalpha() and last.isalpha()):
-        return None
-    if not (first[0].isupper() and last[0].isupper()):
-        return None
-    if first.lower() in _BUSINESS_WORDS or last.lower() in _BUSINESS_WORDS:
-        return None
+    for w in (first, last):
+        if not w.isalpha():
+            return None
+        if not w[0].isupper():
+            return None
+        # Reject acronyms (RRH, JFK) — all letters uppercase
+        if w == w.upper():
+            return None
+        if w.lower() in _NON_NAME_WORDS:
+            return None
     return f"{first} {last}"
 
 

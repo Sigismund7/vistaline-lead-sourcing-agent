@@ -1,4 +1,28 @@
-# Owner Researcher v2 — Design Spec
+# Owner Researcher — Design Docs
+
+---
+
+## What shipped in Phase 2 (2026-05-04)
+
+These improvements are live on the `tightening` branch.
+
+### 2.OR — Per-lead checkpointing
+
+**Problem:** The original `run()` accumulated all parallel futures into a `results = {}` dict, then applied them to leads in a second pass after every future finished. If the process crashed mid-batch (e.g. at lead 30 of 50), all 29 completed lookups were lost. On `--resume`, the full batch re-ran — wasting up to 29 Claude Sonnet calls.
+
+**Fix:** Each future's result is now applied to its lead immediately inside the `as_completed` loop, followed by `state.save_leads()`. The lead is written to Supabase before the next future is processed.
+
+**Resume behavior:** `targets = [l for l in state.leads if l.kept and not l.owner_full_name]` already naturally skips leads with `owner_full_name` set. After this change, leads are checkpointed one-by-one, so a crash at lead 30 means the next `--resume` starts from lead 31, not lead 1.
+
+**Cost of `save_leads()`:** It does a DELETE + bulk INSERT of all leads. At 50 leads called up to 50 times, that is 2,550 Supabase row writes per campaign — well within the free tier.
+
+**What did NOT change:** `MAX_PARALLEL`, the phase ordering (website first, then BBB/Google), the Claude prompts, the `_split_name` / `_phase1_website` / `_phase2_bbb` helpers, or the final summary log format.
+
+**Files changed:** `agents/owner_researcher.py` only (lines 233–282 replaced).
+
+---
+
+## v2 Design Spec — Planned (not yet built)
 
 **Date:** 2026-05-04
 **Author:** Daschel + Claude (brainstorming pair)

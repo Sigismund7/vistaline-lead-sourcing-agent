@@ -52,6 +52,12 @@ def _compress_for_vision(image_png: bytes) -> tuple[bytes, str]:
     # Crop to first _VISION_CROP_HEIGHT rows; clamp so we don't over-crop.
     crop_h = min(h, _VISION_CROP_HEIGHT)
     img = img.crop((0, 0, w, crop_h))
+    # Cap width at 1280 px — Anthropic rejects images wider than 8000 px, and
+    # Playwright's viewport is already set to 1280, but retina/HiDPI captures
+    # can produce 2x-wide screenshots (e.g. 2560 px) that trigger the limit.
+    if img.width > 1280:
+        ratio = 1280 / img.width
+        img = img.resize((1280, int(img.height * ratio)), Image.LANCZOS)
     # Convert RGBA/P to RGB before JPEG encoding (JPEG doesn't support alpha).
     if img.mode in ("RGBA", "P", "LA"):
         img = img.convert("RGB")

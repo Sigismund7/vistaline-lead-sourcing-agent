@@ -39,6 +39,11 @@ class Config:
     # defense-in-depth complement to the dashboard cap.
     brave_search_key: str = ""
 
+    # Owner Researcher Phase 3 — OpenCorporates API for business ownership lookup.
+    # Requires paid API key. Empty when not provisioned; downstream code should
+    # raise RuntimeError when actually constructing the client.
+    opencorporates_api_key: str = ""
+
     # ---- Rate limiting (Mitigation 10) ----
     azure_maps_rate_limit_qps: float = 1.5
     azure_maps_jitter_ms: int = 200
@@ -88,6 +93,7 @@ CONFIG = Config(
     azure_maps_key=_optional("AZURE_MAPS_KEY"),
     yelp_fusion_key=_optional("YELP_FUSION_KEY"),
     brave_search_key=_optional("BRAVE_SEARCH_KEY"),
+    opencorporates_api_key=_optional("OPENCORPORATES_API_KEY"),
     supabase_url=_optional("SUPABASE_URL"),
     supabase_service_role_key=_optional("SUPABASE_SERVICE_ROLE_KEY"),
     vistaline_api_secret=_optional("VISTALINE_API_SECRET"),

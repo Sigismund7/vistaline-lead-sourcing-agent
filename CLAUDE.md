@@ -81,7 +81,7 @@ When I ask for a new feature, default to:
 
 The `frontend/` directory is a Next.js 16 app deployed on Vercel. **Read `frontend/AGENTS.md` before touching any Next.js code** — this version has breaking API changes from prior versions.
 
-**Live URL:** `https://frontend-9qqfxnitg-daschelgorgenyi-vistalinedigs-projects.vercel.app`
+**Live URL:** `https://frontend-eight-xi-78.vercel.app`
 
 **Backend (Railway):** `https://vistaline-lead-sourcing-agent-production.up.railway.app`
 

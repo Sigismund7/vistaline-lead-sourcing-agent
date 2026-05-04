@@ -9,7 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { getCampaign, getLeads, patchLead, csvUrl } from "@/lib/api";
+import { getCampaign, getLeads, patchLead } from "@/lib/api";
 import type { Campaign, Lead } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -45,6 +45,22 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
         l.ownerLast.toLowerCase().includes(q),
     );
   }, [leads, search]);
+
+  async function downloadCsv(type: "findymail" | "master") {
+    const url = type === "findymail"
+      ? `/api/proxy/campaigns/${id}/leads.csv`
+      : `/api/proxy/campaigns/${id}/leads/master.csv`;
+    const filename = type === "findymail" ? `findymail-${id}.csv` : `master-${id}.csv`;
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(href);
+  }
 
   function toggle(lead: Lead) {
     const next = !lead.excludedByUser;
@@ -96,15 +112,11 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button asChild variant="outline">
-            <a href={csvUrl(id, "master")} download>
-              <Download className="mr-2 size-4" /> Master CSV
-            </a>
+          <Button variant="outline" onClick={() => downloadCsv("master")}>
+            <Download className="mr-2 size-4" /> Master CSV
           </Button>
-          <Button asChild>
-            <a href={csvUrl(id, "findymail")} download>
-              <Download className="mr-2 size-4" /> FindyMail CSV
-            </a>
+          <Button onClick={() => downloadCsv("findymail")}>
+            <Download className="mr-2 size-4" /> FindyMail CSV
           </Button>
         </div>
       </div>

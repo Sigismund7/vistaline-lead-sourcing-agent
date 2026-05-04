@@ -6,6 +6,25 @@
 
 ---
 
+> # 🚨🚨🚨 ACTION REQUIRED — DASCHEL 🚨🚨🚨
+> # UPGRADE OPENCORPORATES SUBSCRIPTION
+>
+> **Free tier = 50 lookups/day. This will choke any campaign over ~50 leads.**
+>
+> Go to: **https://opencorporates.com/api_accounts/new**
+>
+> - Sign up for a paid API plan
+> - Paid tier is ~$0.50 per 1,000 lookups (dirt cheap)
+> - Set the API token as `OPENCORPORATES_API_KEY` in:
+>   - Railway env vars (backend)
+>   - `.env.local` (local dev)
+>
+> **Until upgraded:** Phase 3 will silently rate-limit at 50 leads/day and fall through to Phase 4 (paid web_search). You'll quietly burn extra Anthropic dollars.
+>
+> # 🚨🚨🚨 DO NOT FORGET 🚨🚨🚨
+
+---
+
 ## Goal
 
 Push owner-name hit rate from ~75% to **~92-95%** while keeping per-lead Anthropic spend at or below current levels. Universal coverage across all 50 US states without per-state adapters.

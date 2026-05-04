@@ -29,8 +29,10 @@ export async function startCampaign(formData: {
   });
 
   if (!res.ok) {
-    const body = await res.text().catch(() => res.statusText);
-    throw new Error(`Failed to create campaign: ${res.status} ${body}`);
+    const detail = res.status >= 500
+      ? "The backend is unavailable. Try again in a moment."
+      : await res.text().catch(() => res.statusText);
+    throw new Error(detail);
   }
 
   const { id } = await res.json();

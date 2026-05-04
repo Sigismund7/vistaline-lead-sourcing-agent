@@ -29,6 +29,8 @@ export default function NewCampaignPage() {
   const [nicheSlug, setNicheSlug] = useState<string | null>(null);
   const [customNiche, setCustomNiche] = useState("");
   const [keywordVariants, setKeywordVariants] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const selected = nicheSlug && nicheSlug !== CUSTOM_SLUG
     ? NICHE_PRESETS.find((n) => n.slug === nicheSlug) ?? null
@@ -60,14 +62,17 @@ export default function NewCampaignPage() {
 
   async function handleStart(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
     const niche = selected?.displayName ?? (isCustom ? customNiche : "");
-    if (!city || !niche) return;
-    await startCampaign({
-      city,
-      stateAbbr,
-      niche,
-      targetCount: count,
-    });
+    if (!city.trim()) { setError("City is required."); return; }
+    if (!niche) { setError("Please select a niche."); return; }
+    setSubmitting(true);
+    try {
+      await startCampaign({ city: city.trim(), stateAbbr, niche, targetCount: count });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start campaign. Try again.");
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -256,11 +261,19 @@ export default function NewCampaignPage() {
           </CardContent>
         </Card>
 
+        {error && (
+          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {error}
+          </p>
+        )}
+
         <div className="flex items-center justify-end gap-3">
           <Button type="button" variant="ghost" asChild>
             <Link href="/campaigns">Cancel</Link>
           </Button>
-          <Button type="submit">Start campaign</Button>
+          <Button type="submit" disabled={submitting}>
+            {submitting ? "Starting…" : "Start campaign"}
+          </Button>
         </div>
       </form>
     </div>

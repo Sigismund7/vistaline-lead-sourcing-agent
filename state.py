@@ -132,7 +132,10 @@ class CampaignState:
             db.table("leads").delete().eq("campaign_id", self.campaign_id).execute()
             db.table("leads").insert(rows).execute()
         except Exception as exc:
-            print(f"[state] save_leads failed (non-fatal): {exc}")
+            msg = f"save_leads failed — leads not persisted: {exc}"
+            print(f"[state] {msg}")
+            self.info("state", msg, level="error")
+            raise
 
     @classmethod
     def load(cls, campaign_id: str) -> "CampaignState":

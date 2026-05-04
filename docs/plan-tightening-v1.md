@@ -260,61 +260,154 @@ One task per finding, frequency-ordered, TDD-enforced, code-reviewed.
 - **2.AD-7 Dedup threshold tuning** in `agents/sourcer.py` if `dedup-missed-duplicate` or `dedup-false-merge` findings appear.
 - **2.LE LLM email extractor (Haiku):** trigger `email-missing` >20% of leads_with_known_website.
 
-### Task 2.KW — Keyword noise tightening (smoke finding: 7 occurrences)
+---
 
-Replace bare "kitchen" keyword rotation in both source adapters with terms that don't match food businesses.
+### Task 2.NEWS — Website-finder news/PR domain blocklist *(build first)*
+
+**Priority:** XS — one frozenset change, build before 2.KW or 2.CD.
+
+**Problem:** `website_finder.py` Stage 2 Bing search can return press-release and news
+coverage URLs (e.g. `prnewswire.com/ABC-Contracting-Wins-Award`) that look like business
+websites. These get stored as the lead's website and cause the crawler to scrape a press
+release instead of a real business page, reducing owner-research quality downstream.
+
+**File:** `agents/website_finder.py`
+
+**Change:** Add to `_DIRECTORY_DOMAINS` frozenset:
+```python
+# News and press-release sites — not business homepages
+"businessinsider.com",
+"prnewswire.com",
+"prweb.com",
+"globenewswire.com",
+"accesswire.com",
+"einpresswire.com",
+"newswire.com",
+```
+
+No logic changes — frozenset membership only. After adding, run import smoke test:
+```bash
+python -c "from agents import website_finder; print('OK')"
+```
+
+Regression test: add one test case to `tests/test_website_finder.py` confirming a
+`prnewswire.com` URL is rejected as a directory domain.
+
+**Worktree:** `tightening/website-finder-news-domains`
+
+---
+
+### Task 2.KW — Keyword noise tightening *(smoke finding: 7 occurrences)*
+
+Replace bare "kitchen" keyword rotation in both source adapters with terms that don't
+match food businesses.
 
 **Files:** `agents/sources/azure_maps.py`, `agents/sources/yelp_fusion.py`
 
 **Azure keywords** (replace `_KEYWORDS_BY_NICHE["kitchen remodelers"]`):
 - `"kitchen and bath remodeling"`, `"kitchen cabinet installation"`, `"bathroom remodeling"`
 
-**Yelp terms** (replace `_TERMS_BY_NICHE["kitchen remodelers"]`, drop `None`):
+**Yelp terms** (replace `_TERMS_BY_NICHE["kitchen remodelers"]`, drop the `None` sweep):
 - `"kitchen and bath remodeling"`, `"kitchen cabinet installation"`, `"bathroom remodeling"`, `"home remodeling contractor"`
 
 No logic changes — dict values only. Before submitting, verify that existing test
 `side_effect` lists in `tests/test_source_azure_maps.py` and
 `tests/test_source_yelp_fusion.py` are correctly sized for the new keyword counts
-(Azure: 3, Yelp: 4). Update side_effect entries if any are keyed on specific keyword
-strings rather than call count.
+(Azure: 3 terms, Yelp: 4 terms). Update `side_effect` entries if any are keyed on
+specific keyword strings rather than call count.
+
+Regression test: add one test case asserting that the bare string `"kitchen"` does NOT
+appear in any keyword or term list for the `"kitchen remodelers"` niche (prevents
+re-introduction of the noise term).
 
 Verify with a count=5 run: food businesses should no longer appear in sourced results.
 
-### Task 2.CD — Cross-run dedup cache (prevents re-sourcing same businesses across campaigns)
+**Worktree:** `tightening/keyword-noise`
+
+---
+
+### Task 2.CD — Cross-run dedup cache
+
+Prevents re-sourcing the same businesses across campaigns for the same city.
 
 **New file: `agents/leads_cache.py`** — SQLite-backed seen-leads store.
 
-Two public functions:
-- `filter_unseen(leads, city, state_abbr, ttl_days) -> list[dict]` — returns only leads not in cache within TTL
-- `mark_seen(leads, city, state_abbr, campaign_id)` — upserts new leads into cache
+**Module-level `_DB_PATH`** (exposed for test isolation — tests patch this before calling
+`_init_db()`):
+```python
+_DB_PATH: Path = Path(__file__).parent.parent / "state" / "leads_cache.db"
+```
+Do NOT add a config field for this path. It is internal to the module.
 
-Both functions **skip leads with empty `source_id`** (falsy check) to avoid false
-cache hits from defensive-default adapter output.
+**`_init_db()`** — called at module import level:
+```python
+def _init_db() -> None:
+    Path(_DB_PATH).parent.mkdir(parents=True, exist_ok=True)  # state/ may not exist on first run
+    conn = sqlite3.connect(str(_DB_PATH))
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS seen_leads (
+            source        TEXT NOT NULL,
+            source_id     TEXT NOT NULL,
+            business_name TEXT NOT NULL,
+            city          TEXT NOT NULL,
+            state_abbr    TEXT NOT NULL,
+            first_seen    TEXT NOT NULL,   -- ISO date YYYY-MM-DD
+            campaign_id   TEXT NOT NULL,
+            PRIMARY KEY (source, source_id)
+        )
+    """)
+    conn.commit()
+    conn.close()
 
-**DB path:** resolved as `Path(__file__).parent.parent / "state" / "leads_cache.db"` —
-absolute, same pattern as `csv_assembler.py`. Do NOT add a config field for this path.
-DB is auto-created by `_init_db()` called at module import level (`CREATE TABLE IF NOT EXISTS`).
-Add `state/leads_cache.db` to `.gitignore`.
+_init_db()
+```
 
-Schema:
-```sql
-CREATE TABLE seen_leads (
-    source        TEXT NOT NULL,
-    source_id     TEXT NOT NULL,
-    business_name TEXT NOT NULL,
-    city          TEXT NOT NULL,
-    state_abbr    TEXT NOT NULL,
-    first_seen    TEXT NOT NULL,   -- ISO date YYYY-MM-DD
-    campaign_id   TEXT NOT NULL,
-    PRIMARY KEY (source, source_id)
+The `mkdir(parents=True, exist_ok=True)` is required — `state/` may not exist on first
+run (e.g., fresh clone, new Railway container). Do not omit it.
+
+**`filter_unseen(leads, city, state_abbr, ttl_days) -> list[dict]`**
+
+- Normalize inputs: `city = city.strip().lower()`, `state_abbr = state_abbr.strip().upper()`
+- Skip leads with falsy `source_id` — pass them through as unseen to avoid false cache hits
+- TTL check SQL (use `julianday` — do not compute the cutoff date in Python):
+  ```sql
+  SELECT 1 FROM seen_leads
+  WHERE source = ? AND source_id = ? AND city = ? AND state_abbr = ?
+    AND julianday('now') - julianday(first_seen) < ?
+  ```
+- **Non-fatal:** wrap all DB operations in `try/except Exception`; on any error, log a
+  warning and return the full `leads` list unchanged so the sourcer continues
+- When leads are filtered, log:
+  ```python
+  logger.info("leads_cache: filtered %d/%d already-seen leads", filtered_count, total_count)
+  ```
+
+**`mark_seen(leads, city, state_abbr, campaign_id)`**
+
+- Normalize city/state same as `filter_unseen`
+- Skip leads with falsy `source_id`
+- **Normalize merged source strings to primary source before writing:**
+  ```python
+  source = lead["source"].split("+")[0]  # "azure_maps+yelp_fusion" → "azure_maps"
+  ```
+  This is required: `sourcer.py` sets `source="azure_maps+yelp_fusion"` for merged
+  records. Storing the composite string creates a phantom PK that `filter_unseen` never
+  matches (individual adapter records arrive with single-source strings). Always store
+  the primary (first) source.
+- Upsert via `INSERT OR REPLACE`
+- **Non-fatal:** wrap all DB operations in `try/except Exception`; on any error, log a
+  warning and return without crashing
+
+**Modified: `agents/sourcer.py`**
+
+After `_dedupe_cross_source`, before `_enrich_websites`:
+```python
+deduped = leads_cache.filter_unseen(
+    deduped, state.city, state.state_abbr, CONFIG.leads_cache_ttl_days
 )
 ```
 
-**Modified: `agents/sourcer.py`** — after `_dedupe_cross_source`, before `_enrich_websites`:
-```python
-deduped = leads_cache.filter_unseen(deduped, state.city, state.state_abbr, CONFIG.leads_cache_ttl_days)
-```
-After the append loop, track and mark exactly what was appended:
+After the append loop, track exactly what was appended then call `mark_seen`:
 ```python
 new_leads: list[dict] = []
 for normalized in deduped:
@@ -323,29 +416,241 @@ for normalized in deduped:
     state.leads.append(_to_lead(normalized))
     new_leads.append(normalized)
 leads_cache.mark_seen(new_leads, state.city, state.state_abbr, state.campaign_id)
+if len(new_leads) < state.target_count:
+    state.info("sourcer", "cache filtered short",
+               found=len(new_leads), target=state.target_count)
 ```
-If `len(new_leads) < state.target_count`, log a warning:
-`state.info("sourcer", "cache filtered short", found=len(new_leads), target=state.target_count)`
 
 **Modified: `config.py`** — add one field only:
 ```python
 leads_cache_ttl_days: int = 30
 ```
 
-**Tests (TDD):**
+**Add to `.gitignore`:** `state/leads_cache.db`
 
-`tests/test_leads_cache.py`:
+**Railway note:** SQLite is ephemeral on Railway (wiped on redeploy). This is accepted —
+`leads_cache.py` provides full dedup within a session and across local CLI runs.
+Task 2.DB (below) migrates to Supabase for cross-deployment persistence; build 2.CD
+first and validate it before starting 2.DB.
+
+**Tests — `tests/test_leads_cache.py` (TDD, 11 tests):**
+
+Test isolation: `setUp` patches `leads_cache._DB_PATH` to a temp path and calls
+`leads_cache._init_db()` to create a fresh schema; `tearDown` removes the temp file and
+restores `_DB_PATH`. This ensures tests never touch the real cache and never bleed state
+between test methods.
+
+```python
+import unittest, tempfile, shutil
+from pathlib import Path
+import agents.leads_cache as leads_cache
+
+class TestLeadsCache(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp()
+        self._orig = leads_cache._DB_PATH
+        leads_cache._DB_PATH = Path(self._tmp) / "test_cache.db"
+        leads_cache._init_db()
+
+    def tearDown(self):
+        leads_cache._DB_PATH = self._orig
+        shutil.rmtree(self._tmp, ignore_errors=True)
+```
+
+Test cases (spec compliance review will check all 11 are present):
 1. `filter_unseen` returns all leads when cache is empty
 2. `filter_unseen` drops leads seen within TTL
-3. `filter_unseen` keeps leads seen outside TTL (expired)
-4. `mark_seen` writes correctly; second call on same lead is a no-op (upsert)
+3. `filter_unseen` keeps leads seen outside TTL (set `first_seen` to >30 days ago in `setUp`)
+4. `mark_seen` writes correctly; second call on same lead is a no-op (upsert idempotent)
 5. `filter_unseen` and `mark_seen` skip leads with `source_id=""`
-6. `mark_seen` for Dallas does NOT block `filter_unseen` for Orlando with same source_id
-   (verifies city column is stored and used in WHERE clause)
+6. `mark_seen` for Dallas does NOT block `filter_unseen` for Orlando with the same `source_id`
+   (verifies `city` column is stored and used in the WHERE clause)
+7. `mark_seen` normalizes merged source: a lead with `source="azure_maps+yelp_fusion"` is
+   stored under `source="azure_maps"` and is correctly matched by `filter_unseen` for a
+   lead with `source="azure_maps"` and the same `source_id`
+8. `filter_unseen` with DB locked/unavailable raises no exception and returns full list
+   (non-fatal degradation — simulate by deleting DB file after `setUp`)
+9. `mark_seen` with DB locked/unavailable raises no exception and returns silently
+   (non-fatal degradation — same simulation)
+10. City normalization: `"Tampa"` and `"tampa"` are treated as the same city
+11. `filter_unseen` logs an INFO message when leads are filtered — use
+    `self.assertLogs("leads_cache", level="INFO")` as the context manager; verify the
+    log message contains the filtered count
 
-`tests/test_sourcer.py` (new test):
-7. When cache returns empty list, sourcer logs `"cache filtered short"` warning with
-   correct `found` and `target` values
+**Tests — `tests/test_sourcer.py` (2 new tests, TDD):**
+12. When `leads_cache.filter_unseen` returns `[]`, sourcer calls
+    `state.info("sourcer", "cache filtered short", ...)` with correct `found=0` and
+    `target` values — mock `leads_cache.filter_unseen` to return `[]`
+13. When `leads_cache.filter_unseen` raises `sqlite3.OperationalError`, sourcer does not
+    crash — verifies non-fatal DB error doesn't propagate into the sourcer
+    (mock `leads_cache.filter_unseen` to raise)
+
+**Worktree:** `tightening/cross-run-dedup`
+
+---
+
+### Task 2.OR — Per-lead owner researcher checkpointing
+
+**Problem:** `owner_researcher.py` currently runs all kept leads in a single
+`ThreadPoolExecutor` batch with no intermediate saves. If the process is interrupted
+mid-batch (SIGINT, Railway restart, OOM kill), all completed owner research for that run
+is lost and the entire batch re-runs on `--resume`. On a 50-lead run this wastes ~40
+Claude Sonnet calls ($0.50–$1.00 per wasted run).
+
+**Root cause:** The current completion loop collects all futures before writing any
+results back to `state.leads`. Resume only skips the `owner_researcher` step entirely if
+`state.is_done("owner_researcher")`, which is only marked after the whole batch finishes.
+
+**Fix:** Write each lead back to `CampaignState` as its future completes, then call
+`state.save()`. On resume, check `lead.owner_first` per lead before submitting — already-
+researched leads are skipped individually rather than requiring the entire step to re-run.
+
+**Files:** `agents/owner_researcher.py` (change), `state.py` (read-only verify — no
+schema change needed; `save()` is already non-fatal)
+
+**Skip condition** — add at top of the main function body, before executor setup:
+```python
+leads_to_research = [l for l in state.leads if l.kept and not l.owner_first]
+already_done = len([l for l in state.leads if l.kept]) - len(leads_to_research)
+if already_done:
+    state.info("owner_researcher", "skipping already-researched leads on resume",
+               skipped=already_done)
+```
+
+**Write-back loop** — replace the current bulk-collect pattern with:
+```python
+futures = {executor.submit(_research_one, lead, tools): lead for lead in leads_to_research}
+for future in as_completed(futures):
+    lead = futures[future]
+    result = future.result()               # re-raises if _research_one raised
+    lead.owner_first     = result.owner_first
+    lead.owner_last      = result.owner_last
+    lead.owner_full_name = result.owner_full_name
+    lead.owner_source    = result.owner_source
+    lead.email           = result.email
+    state.save()                           # checkpoint — one Supabase upsert per lead
+```
+
+**`state.save()` cost:** One small Supabase upsert per completed lead (updates counters
+only — leads are saved separately via `state.save_leads()`). At 50 leads this is 50
+tiny upserts. Supabase free tier handles this without issue. `state.save()` is already
+wrapped in try/except (non-fatal on Supabase unavailability).
+
+**Note on `state.save_leads()`:** The per-lead fields (`owner_first` etc.) live on
+`state.leads` objects in memory. `state.save()` only persists the campaign-level summary
+row (counts, status). The full lead rows are persisted at pipeline completion by
+`state.save_leads()`. This means per-lead checkpoint writes are cheap and the full lead
+data is still flushed at the end as before — no double-write of lead row data.
+
+**Test:** Add one test to `tests/test_owner_researcher.py`:
+- Mock `_research_one` to succeed for leads 1 and 2, raise `RuntimeError` on lead 3.
+- Verify `state.save()` was called exactly twice (once after each successful completion).
+- Verify the 2 successful leads have their `owner_first` field populated in `state.leads`.
+- Verify the exception from lead 3 propagates out of the function (i.e., it is not swallowed).
+- This contract: completed work survives a mid-batch crash.
+
+**Worktree:** `tightening/owner-researcher-checkpoint`
+
+---
+
+### Task 2.DB — Leads cache: SQLite → Supabase migration
+
+**Context:** Task 2.CD stores the cross-run dedup cache in SQLite at
+`state/leads_cache.db`. SQLite works perfectly for local CLI runs but is ephemeral on
+Railway — the file is wiped on every container redeploy. A Railway run that crashes and
+resumes after a redeploy loses all cache state and re-sources all leads. This task
+migrates the cache backend to Supabase so dedup state survives Railway restarts.
+
+**Prerequisite:** 2.CD must be live and have at least one production CLI run confirming
+the schema and query patterns are stable before starting 2.DB. Do not build 2.DB first.
+
+**Files:**
+- `agents/leads_cache.py` — replace SQLite backend with Supabase client
+- `state.py` — verify `_db()` helper is importable; no changes needed
+- Supabase schema migration — new `seen_leads` table (run once in Supabase SQL editor)
+
+**Supabase table (operator runs once):**
+```sql
+CREATE TABLE IF NOT EXISTS seen_leads (
+    source        TEXT NOT NULL,
+    source_id     TEXT NOT NULL,
+    business_name TEXT NOT NULL,
+    city          TEXT NOT NULL,
+    state_abbr    TEXT NOT NULL,
+    first_seen    DATE NOT NULL,
+    campaign_id   TEXT NOT NULL,
+    PRIMARY KEY (source, source_id)
+);
+```
+
+**`leads_cache.py` after migration** — drop SQLite imports, import `state._db`:
+
+`filter_unseen`:
+```python
+from datetime import date, timedelta
+
+def filter_unseen(leads, city, state_abbr, ttl_days):
+    city = city.strip().lower()
+    state_abbr = state_abbr.strip().upper()
+    cutoff = (date.today() - timedelta(days=ttl_days)).isoformat()
+    try:
+        db = _db()
+        seen = {
+            (r["source"], r["source_id"])
+            for r in db.table("seen_leads")
+                .select("source,source_id")
+                .eq("city", city)
+                .eq("state_abbr", state_abbr)
+                .gte("first_seen", cutoff)
+                .execute()
+                .data
+        }
+        filtered = [l for l in leads if (l.get("source"), l.get("source_id")) not in seen]
+        if len(filtered) < len(leads):
+            logger.info("leads_cache: filtered %d/%d already-seen leads",
+                        len(leads) - len(filtered), len(leads))
+        return filtered
+    except Exception as exc:
+        logger.warning("leads_cache: filter_unseen failed, returning all leads: %s", exc)
+        return leads
+```
+
+`mark_seen`:
+```python
+def mark_seen(leads, city, state_abbr, campaign_id):
+    city = city.strip().lower()
+    state_abbr = state_abbr.strip().upper()
+    rows = [
+        {
+            "source": l["source"].split("+")[0],
+            "source_id": l["source_id"],
+            "business_name": l["business_name"],
+            "city": city,
+            "state_abbr": state_abbr,
+            "first_seen": date.today().isoformat(),
+            "campaign_id": campaign_id,
+        }
+        for l in leads if l.get("source_id")
+    ]
+    if not rows:
+        return
+    try:
+        _db().table("seen_leads").upsert(rows).execute()
+    except Exception as exc:
+        logger.warning("leads_cache: mark_seen failed, dedup not persisted: %s", exc)
+```
+
+**Test changes after migration:** Replace the SQLite temp-db setup in
+`tests/test_leads_cache.py` with a Supabase client mock. Patch `leads_cache._db` to
+return a mock client with a chainable `.table().select().eq().gte().execute()` pattern.
+All 11 test cases remain valid — only the mock wiring changes.
+
+**Cost:** Zero new paid surfaces. `seen_leads` at 500 leads/week is ~100KB/year — well
+within Supabase free tier (500MB storage, unlimited rows).
+
+**Worktree:** `tightening/leads-cache-supabase`
+
+---
 
 Cost-discipline gate on every task.
 

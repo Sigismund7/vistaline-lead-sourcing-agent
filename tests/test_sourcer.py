@@ -65,11 +65,6 @@ class SourcerRunTest(unittest.TestCase):
     def tearDown(self) -> None:
         for p in self._patches:
             p.stop()
-        # Clean up any state file the run wrote to disk.
-        try:
-            self.state.path.unlink()
-        except FileNotFoundError:
-            pass
 
     def test_run_returns_early_when_already_done(self):
         """is_done('sourcer') short-circuits — adapters never get called."""

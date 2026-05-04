@@ -237,9 +237,21 @@ def run(state: CampaignState, anthropic_key: str) -> None:
         return
 
     targets = [l for l in state.leads if l.kept and not l.owner_full_name]
-    state.info("owner_researcher", f"researching {len(targets)} owners (parallel × {MAX_PARALLEL})")
+    already_done = sum(1 for l in state.leads if l.kept) - len(targets)
+    if already_done:
+        state.info(
+            "owner_researcher",
+            "skipping already-researched leads on resume",
+            skipped=already_done,
+        )
+    state.info(
+        "owner_researcher",
+        f"researching {len(targets)} owners (parallel × {MAX_PARALLEL})",
+    )
 
-    results = {}
+    via_website = via_bbb = not_found = 0
+    pre_enriched = 0
+
     with futures.ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
         future_map = {
             pool.submit(_research_one, lead, state.city, state.state_abbr, anthropic_key): lead
@@ -248,31 +260,31 @@ def run(state: CampaignState, anthropic_key: str) -> None:
         for fut in futures.as_completed(future_map):
             lead = future_map[fut]
             try:
-                results[id(lead)] = fut.result()
+                result = fut.result()
             except Exception as e:
                 state.info("owner_researcher", f"error on {lead.business_name}", error=str(e))
-                results[id(lead)] = {"owner_full_name": "", "confidence": "none"}
+                not_found += 1
+                continue
 
-    via_website = via_bbb = not_found = 0
-    pre_enriched = 0  # Phase 1 found both name AND email — saves a FindyMail credit
-    for lead in targets:
-        result = results.get(id(lead), {})
-        full = (result.get("owner_full_name") or "").strip()
-        if full and result.get("confidence") in ("high", "medium"):
-            lead.owner_full_name = full
-            lead.owner_first, lead.owner_last = _split_name(full)
-            lead.owner_source = result.get("phase", "")
-            # Phase 1 may also return an owner_email; Phase 2 (BBB) won't.
-            email = (result.get("owner_email") or "").strip().lower()
-            if email and result.get("phase") == "website":
-                lead.email = email
-                pre_enriched += 1
-            if result.get("phase") == "website":
-                via_website += 1
+            full = (result.get("owner_full_name") or "").strip()
+            if full and result.get("confidence") in ("high", "medium"):
+                lead.owner_full_name = full
+                lead.owner_first, lead.owner_last = _split_name(full)
+                lead.owner_source = result.get("phase", "")
+                email = (result.get("owner_email") or "").strip().lower()
+                if email and result.get("phase") == "website":
+                    lead.email = email
+                    pre_enriched += 1
+                if result.get("phase") == "website":
+                    via_website += 1
+                else:
+                    via_bbb += 1
             else:
-                via_bbb += 1
-        else:
-            not_found += 1
+                not_found += 1
+
+            # Checkpoint: persist all leads after each completion so --resume
+            # skips already-researched leads if the process crashes mid-batch.
+            state.save_leads()
 
     state.info(
         "owner_researcher",

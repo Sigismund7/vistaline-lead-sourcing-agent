@@ -10,9 +10,9 @@ diversity):
      businesses (Mitigation 12 — Yelp's right answer for our niche is
      contractors,kitchen_and_bath,homeservices).
   2. A rotation of `term` values broadens the surface within those
-     categories. The rotation includes a `None` entry, which exercises a
-     category-only sweep — Yelp often returns broader results when no text
-     term is supplied.
+     categories. For bathroom niches a `None` entry exercises a category-only
+     sweep; kitchen niches drop this to avoid food-business noise via the
+     homeservices category.
 
 Yelp's Business Search response intentionally does NOT carry the business's
 own website URL — only the Yelp listing page. We therefore always return
@@ -39,20 +39,21 @@ _CATEGORIES_BY_NICHE: dict[str, str] = {
 }
 
 # Term rotations. None means "category-only sweep, no text term" — included
-# deliberately because Yelp's relevance model returns broader results when
-# the only filter is the category alias.
+# deliberately for bathroom niches because Yelp's relevance model returns
+# broader results when the only filter is the category alias. Kitchen niches
+# drop None to avoid restaurant noise via the homeservices category.
 _TERMS_BY_NICHE: dict[str, list[str | None]] = {
     "kitchen remodelers": [
-        "kitchen remodeling",
-        "kitchen renovation",
-        "kitchen contractor",
-        None,
+        "kitchen and bath remodeling",
+        "kitchen cabinet installation",
+        "bathroom remodeling",
+        "home remodeling contractor",
     ],
     "kitchen remodeling": [
-        "kitchen remodeling",
-        "kitchen renovation",
-        "kitchen contractor",
-        None,
+        "kitchen and bath remodeling",
+        "kitchen cabinet installation",
+        "bathroom remodeling",
+        "home remodeling contractor",
     ],
     "bathroom remodelers": [
         "bathroom remodeling",

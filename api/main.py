@@ -38,6 +38,8 @@ class CampaignCreate(BaseModel):
     niche: str
     target_count: int = 50
     triggered_by: str = "DG"
+    use_registry: bool = True
+    use_websearch: bool = True
 
 
 @app.get("/campaigns")
@@ -60,6 +62,8 @@ def create_campaign(body: CampaignCreate, background_tasks: BackgroundTasks, _: 
     state.state_abbr = body.state_abbr.upper()
     state.niche = body.niche
     state.target_count = body.target_count
+    state.use_registry = body.use_registry
+    state.use_websearch = body.use_websearch
     state.status = "running"
     state.save()
     background_tasks.add_task(run_pipeline, state.campaign_id)
@@ -72,6 +76,8 @@ def create_campaign(body: CampaignCreate, background_tasks: BackgroundTasks, _: 
         "triggered_by": state.triggered_by,
         "status": "running",
         "created_at": state.created_at,
+        "use_registry": state.use_registry,
+        "use_websearch": state.use_websearch,
     }
 
 

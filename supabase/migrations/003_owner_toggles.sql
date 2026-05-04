@@ -1,0 +1,4 @@
+-- Adds per-campaign toggles for Owner Researcher v2 phases.
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS use_houzz    BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS use_registry BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS use_websearch BOOLEAN NOT NULL DEFAULT TRUE;

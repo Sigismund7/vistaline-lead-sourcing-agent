@@ -31,6 +31,8 @@ export default function NewCampaignPage() {
   const [keywordVariants, setKeywordVariants] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [useRegistry, setUseRegistry] = useState(true);
+  const [useWebsearch, setUseWebsearch] = useState(true);
 
   const selected = nicheSlug && nicheSlug !== CUSTOM_SLUG
     ? NICHE_PRESETS.find((n) => n.slug === nicheSlug) ?? null
@@ -68,7 +70,7 @@ export default function NewCampaignPage() {
     if (!niche) { setError("Please select a niche."); return; }
     setSubmitting(true);
     try {
-      await startCampaign({ city: city.trim(), stateAbbr, niche, targetCount: count });
+      await startCampaign({ city: city.trim(), stateAbbr, niche, targetCount: count, useRegistry, useWebsearch });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start campaign. Try again.");
       setSubmitting(false);
@@ -246,6 +248,47 @@ export default function NewCampaignPage() {
               />
               <p className="text-xs text-muted-foreground">5–50 miles from city center.</p>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Research phases</CardTitle>
+            <CardDescription>
+              Toggle off to skip a phase. Phase 1 (website crawl) always runs.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {[
+              {
+                id: "use-registry",
+                label: "Business registry",
+                desc: "Free — OpenCorporates officer lookup (50/day free tier).",
+                value: useRegistry,
+                set: setUseRegistry,
+              },
+              {
+                id: "use-websearch",
+                label: "Web search fallback",
+                desc: "~$0.05/lead — BBB, Houzz, Google, review responses via AI search.",
+                value: useWebsearch,
+                set: setUseWebsearch,
+              },
+            ].map(({ id, label, desc, value, set }) => (
+              <div key={id} className="flex items-start gap-3">
+                <input
+                  id={id}
+                  type="checkbox"
+                  checked={value}
+                  onChange={(e) => set(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-border accent-brand"
+                />
+                <label htmlFor={id} className="cursor-pointer">
+                  <span className="text-sm font-medium">{label}</span>
+                  <p className="text-xs text-muted-foreground">{desc}</p>
+                </label>
+              </div>
+            ))}
           </CardContent>
         </Card>
 

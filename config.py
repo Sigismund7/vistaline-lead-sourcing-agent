@@ -39,6 +39,11 @@ class Config:
     # defense-in-depth complement to the dashboard cap.
     brave_search_key: str = ""
 
+    # Owner Researcher Phase 3 — OpenCorporates API for business ownership lookup.
+    # Requires paid API key. Empty when not provisioned; downstream code should
+    # raise RuntimeError when actually constructing the client.
+    opencorporates_api_key: str = ""
+
     # ---- Rate limiting (Mitigation 10) ----
     azure_maps_rate_limit_qps: float = 1.5
     azure_maps_jitter_ms: int = 200
@@ -71,6 +76,10 @@ class Config:
     # is conservative — calibrate during smoke testing if needed.
     dedup_match_threshold: int = 85
 
+    # ---- Cross-run dedup cache ----
+    # Leads seen for this city+state within ttl_days are skipped on re-sourcing.
+    leads_cache_ttl_days: int = 30
+
     # ---- Personalizer (post-FindyMail X/Y + LinkedIn) ----
     personalizer_max_parallel: int = 4
     personalizer_vision_model: str = "claude-sonnet-4-20250514"
@@ -84,6 +93,7 @@ CONFIG = Config(
     azure_maps_key=_optional("AZURE_MAPS_KEY"),
     yelp_fusion_key=_optional("YELP_FUSION_KEY"),
     brave_search_key=_optional("BRAVE_SEARCH_KEY"),
+    opencorporates_api_key=_optional("OPENCORPORATES_API_KEY"),
     supabase_url=_optional("SUPABASE_URL"),
     supabase_service_role_key=_optional("SUPABASE_SERVICE_ROLE_KEY"),
     vistaline_api_secret=_optional("VISTALINE_API_SECRET"),

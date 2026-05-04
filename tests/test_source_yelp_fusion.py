@@ -146,6 +146,15 @@ class SourceLeadsTest(unittest.TestCase):
         # counting None as its own value (the category-only sweep).
         self.assertGreaterEqual(len({repr(t) for t in terms_used}), 2)
 
+    def test_kitchen_remodelers_terms_do_not_contain_none_sweep(self):
+        """None term (category-only sweep) pulls restaurants via homeservices category."""
+        from agents.sources.yelp_fusion import _TERMS_BY_NICHE
+        for niche in ("kitchen remodelers", "kitchen remodeling"):
+            self.assertNotIn(
+                None, _TERMS_BY_NICHE[niche],
+                f"niche '{niche}' contains None term — causes restaurant noise via homeservices",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

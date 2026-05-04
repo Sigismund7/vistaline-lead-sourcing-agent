@@ -121,6 +121,16 @@ class SourceLeadsTest(unittest.TestCase):
         # Mitigation 11: pattern diversity — at least 2 distinct queries.
         self.assertGreaterEqual(len(set(queries_used)), 2)
 
+    def test_kitchen_remodelers_keywords_do_not_contain_bare_kitchen(self):
+        """No bare 'kitchen' keyword — root cause of restaurant noise in Tampa smoke run."""
+        from agents.sources.azure_maps import _KEYWORDS_BY_NICHE
+        for niche in ("kitchen remodelers", "kitchen remodeling"):
+            for kw in _KEYWORDS_BY_NICHE[niche]:
+                self.assertNotEqual(
+                    kw, "kitchen",
+                    f"niche '{niche}' contains bare 'kitchen' keyword — causes food noise",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

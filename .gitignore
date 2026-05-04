@@ -56,3 +56,4 @@ state/leads_cache.db
 # Logs
 *.log
 .gstack/
+.playwright-mcp/

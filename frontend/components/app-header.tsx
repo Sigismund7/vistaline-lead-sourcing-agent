@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { UserButton } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
 
 const NAV: Array<{ href: string; label: string }> = [
@@ -12,7 +11,6 @@ export function AppHeader({ activePath }: { activePath?: string }) {
       data-testid="app-header"
       className="sticky top-0 z-30 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80"
     >
-      {/* subtle top accent line */}
       <div className="h-px w-full bg-gradient-to-r from-transparent via-brand/60 to-transparent" />
       <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-6">
         <Link href="/campaigns" className="flex items-center gap-3" data-testid="wordmark">
@@ -20,10 +18,7 @@ export function AppHeader({ activePath }: { activePath?: string }) {
             <span className="text-[#2563eb]">Vistaline</span>
             <span className="text-foreground">Digital</span>
           </span>
-          <span
-            aria-hidden
-            className="hidden h-4 w-px bg-border sm:block"
-          />
+          <span aria-hidden className="hidden h-4 w-px bg-border sm:block" />
           <span className="hidden text-xs tracking-widest uppercase text-muted-foreground sm:block">
             Lead Sourcer
           </span>
@@ -46,9 +41,14 @@ export function AppHeader({ activePath }: { activePath?: string }) {
             );
           })}
         </nav>
-        <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
-          <UserButton />
-        </div>
+        <form action="/api/auth/logout" method="POST" className="ml-auto">
+          <button
+            type="submit"
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Sign out
+          </button>
+        </form>
       </div>
     </header>
   );

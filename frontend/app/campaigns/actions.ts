@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { currentUser } from "@clerk/nextjs/server";
+import { cookies } from "next/headers";
 
 export async function startCampaign(formData: {
   city: string;
@@ -9,11 +9,8 @@ export async function startCampaign(formData: {
   niche: string;
   targetCount: number;
 }) {
-  const user = await currentUser();
-  const triggeredBy =
-    user?.firstName ??
-    user?.emailAddresses?.[0]?.emailAddress?.split("@")[0] ??
-    "User";
+  const jar = await cookies();
+  const triggeredBy = jar.get("username")?.value ?? process.env.AUTH_USERNAME ?? "User";
 
   const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
   const res = await fetch(`${base}/campaigns`, {

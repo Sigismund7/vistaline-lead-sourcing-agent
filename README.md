@@ -151,17 +151,38 @@ Only includes kept leads that have both an owner name and a domain.
 
 ---
 
-## Cost per city (50 leads)
+## Cost breakdown
 
-| Service | Cost |
-|---|---|
-| Azure Maps POI Search | ~$0.05 est. |
-| Yelp Fusion | Free tier (500 calls/day) |
-| Brave Web Search | Free tier (2,000 queries/month shared) |
-| Anthropic API (filter + owner research) | ~$0.30–$0.80 |
-| **Total** | **under $1** |
+### Per-campaign cost (50 leads)
 
-Repeat campaigns on the same city are cheaper — the cross-run dedup cache filters already-seen leads before they reach the LLM filter.
+| Service | Free tier | Paid rate | Typical 50-lead cost |
+|---|---|---|---|
+| Azure Maps POI Search | $200 credit/month (new accounts) | $4.50 per 1,000 transactions | ~$0.05 |
+| Yelp Fusion | 500 calls/day | — | $0 |
+| Brave Web Search | 2,000 queries/month | $3 per 1,000 after free tier | $0 (within free tier) |
+| Anthropic — lead filter | — | Claude Haiku ~$0.80/1M input tokens | ~$0.02–$0.05 |
+| Anthropic — owner research | — | Claude Sonnet ~$3/1M input tokens | ~$0.30–$0.75 |
+| **Total** | | | **$0.35–$0.85** |
+
+### Where the money actually goes
+
+**Lead filter (Claude Haiku)** is the cheap step. 50 leads batched into 2 groups of 25, each prompt ~2,000 tokens. Total: ~4,000 input tokens → less than $0.01. Haiku is used here deliberately — it's fast, cheap, and the classification task doesn't need Sonnet reasoning.
+
+**Owner researcher (Claude Sonnet)** is where most of the spend lives. Each lead that reaches Phase 1 gets a prompt containing up to 5 scraped web pages (~5,000–15,000 tokens). Of the ~75–80% of leads where Phase 1 succeeds, that's roughly 40 Sonnet calls. Leads that fall to Phase 2 (BBB/Google web search) add another ~2,000 tokens each for the tool-use round-trip. A 50-lead campaign with a ~75% Phase 1 hit rate runs about 38 Phase 1 calls + 12 Phase 2 calls, totalling roughly 200,000–400,000 input tokens → **$0.30–$0.75**.
+
+**Brave Web Search** (website finder) fires once per lead that arrives with no website from the sourcer. In practice that's 20–40% of leads — maybe 15–25 queries per campaign. Well within the 2,000/month free tier for any reasonable campaign cadence.
+
+**Azure Maps and Yelp** are negligible. The sourcer issues 3–4 keyword queries per niche per source (6–8 total API calls) regardless of how many leads come back. Azure is free for the first $200 of usage each month on new accounts; after that it's $4.50/1,000 transactions — so even at paid rates that's under $0.05 per campaign.
+
+### Repeat campaigns on the same city
+
+The cross-run dedup cache (SQLite, 30-day TTL) tracks which leads have already been sourced. On a second run in the same city within 30 days, already-seen leads are filtered out before they ever reach the LLM filter. This means:
+
+- **Zero Anthropic spend** on re-filtering leads you already processed
+- **Zero owner research spend** on businesses you already looked up
+- The sourcer still runs (fast, no LLM) to catch genuinely new businesses that appeared since the last run
+
+In practice: the first run for a city costs $0.35–$0.85. A re-run two weeks later, targeting new leads only, costs a fraction of that.
 
 ---
 

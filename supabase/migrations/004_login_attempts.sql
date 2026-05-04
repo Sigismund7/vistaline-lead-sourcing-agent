@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS login_attempts (
     attempted_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX login_attempts_ip_time ON login_attempts (ip, attempted_at);
+CREATE INDEX IF NOT EXISTS login_attempts_ip_time ON login_attempts (ip, attempted_at);
 
 ALTER TABLE login_attempts ENABLE ROW LEVEL SECURITY;
 -- No policies = only service role can access

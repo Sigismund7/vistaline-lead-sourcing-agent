@@ -14,6 +14,10 @@ const RATE_LIMIT_WINDOW_MINUTES = 15;
 const RATE_LIMIT_MAX_ATTEMPTS = 10;
 
 export async function POST(req: Request) {
+  if (!process.env.AUTH_USERNAME || !process.env.AUTH_PASSWORD || !process.env.SESSION_SECRET) {
+    throw new Error("AUTH_USERNAME, AUTH_PASSWORD, and SESSION_SECRET env vars are required");
+  }
+
   const clientIp =
     req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
 
@@ -50,7 +54,15 @@ export async function POST(req: Request) {
   }
 
   // --- Credential check (constant-time) ---
-  const { username, password } = await req.json();
+  let username: string | undefined;
+  let password: string | undefined;
+  try {
+    const body = await req.json();
+    username = body.username;
+    password = body.password;
+  } catch {
+    return NextResponse.json({ error: "Bad request" }, { status: 400 });
+  }
 
   const expectedUsername = process.env.AUTH_USERNAME ?? "";
   const expectedPassword = process.env.AUTH_PASSWORD ?? "";
@@ -65,7 +77,7 @@ export async function POST(req: Request) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (supabase.from("login_attempts") as any).insert({
         ip: clientIp,
-        username_attempted: username ?? "",
+        username_attempted: (username ?? "").substring(0, 256),
         succeeded: credentialsValid,
       });
     } catch (err) {
@@ -86,6 +98,6 @@ export async function POST(req: Request) {
     path: "/",
   };
   res.cookies.set("session", process.env.SESSION_SECRET!, cookieOpts);
-  res.cookies.set("username", username, { ...cookieOpts, httpOnly: false });
+  res.cookies.set("username", username ?? "", { ...cookieOpts, httpOnly: false });
   return res;
 }

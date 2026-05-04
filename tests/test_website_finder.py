@@ -160,5 +160,36 @@ class FindWebsiteBraveFallbackTest(unittest.TestCase):
         self.assertIsNone(url)
 
 
+class DirectoryBlocklistTest(unittest.TestCase):
+    def test_prnewswire_rejected_as_directory(self):
+        """prnewswire.com is a press-release host, not a business site."""
+        session = MagicMock(spec=requests.Session)
+        brave = MagicMock(spec=tools.BraveSearchClient)
+        # Use a business name that won't match typical pattern guesses.
+        brave.search_web.return_value = [
+            {"title": "Best Renovations Wins Award",
+             "url": "https://www.prnewswire.com/news-releases/best-renovations-wins-123"},
+            {"title": "Real Site", "url": "https://bestrenovationsinc.com/"},
+        ]
+
+        def head_router(url, **kwargs):
+            # Pattern-guess candidates all fail. Both Brave results have valid
+            # HEAD responses; directory blocklist should filter out prnewswire,
+            # allowing the real site to win.
+            if "bestrenovationsinc.com" in url:
+                return _head_resp(status_code=200, url="https://bestrenovationsinc.com/")
+            if "prnewswire.com" in url:
+                return _head_resp(status_code=200, url="https://www.prnewswire.com/news-releases/best-renovations-wins-123")
+            raise requests.ConnectionError("nope")
+
+        session.head.side_effect = head_router
+        url = website_finder.find_website(
+            "Best Renovations Inc", "Tampa", "FL",
+            brave_client=brave, http_session=session,
+        )
+        # prnewswire must be skipped; real site must win.
+        self.assertEqual(url, "https://bestrenovationsinc.com/")
+
+
 if __name__ == "__main__":
     unittest.main()

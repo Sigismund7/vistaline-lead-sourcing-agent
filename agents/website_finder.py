@@ -35,6 +35,11 @@ _DIRECTORY_DOMAINS = frozenset({
     "yellowpages.com", "manta.com", "thumbtack.com", "porch.com",
     "nextdoor.com", "google.com", "maps.google.com", "twitter.com",
     "x.com", "youtube.com", "pinterest.com",
+    # News and press-release hosts — Brave returns these for contractors
+    # mentioned in awards/permits coverage. Not business homepages.
+    "businessinsider.com", "prnewswire.com", "prweb.com",
+    "globenewswire.com", "accesswire.com", "einpresswire.com",
+    "newswire.com",
 })
 
 

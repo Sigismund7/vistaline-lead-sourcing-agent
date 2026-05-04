@@ -21,14 +21,14 @@ from tools import AzureMapsClient
 # short — pattern diversity, not coverage breadth, is the goal here.
 _KEYWORDS_BY_NICHE: dict[str, list[str]] = {
     "kitchen remodelers": [
-        "kitchen remodeling",
-        "kitchen renovation",
-        "kitchen contractor",
+        "kitchen and bath remodeling",
+        "kitchen cabinet installation",
+        "bathroom remodeling",
     ],
     "kitchen remodeling": [
-        "kitchen remodeling",
-        "kitchen renovation",
-        "kitchen contractor",
+        "kitchen and bath remodeling",
+        "kitchen cabinet installation",
+        "bathroom remodeling",
     ],
     "bathroom remodelers": [
         "bathroom remodeling",

@@ -31,6 +31,37 @@ MAX_PARALLEL = 10  # I/O-bound; each worker constructs its own Anthropic client.
 # Uniform phase signature
 PhaseFn = Callable[[Lead, str, str, str], dict]
 
+# Words that disqualify a business name from being an eponymous person name.
+_BUSINESS_WORDS = frozenset({
+    "construction", "design", "build", "remodel", "remodeling", "kitchen",
+    "bath", "home", "services", "group", "associates", "partners", "inc",
+    "llc", "ltd", "corp", "company", "co", "tile", "flooring", "cabinets",
+    "interior", "exterior", "builders", "contractor", "contractors",
+    "improvement", "improvements", "renovation", "renovations", "concepts",
+    "solutions", "studio", "projects", "properties", "management",
+})
+
+
+def _eponymous_owner(business_name: str) -> str | None:
+    """Return the business name as an owner name if it looks like 'First Last'.
+
+    Catches businesses like 'Andrew Roby' or 'John Smith Remodeling' where
+    the first two words are clearly a person's name and not business keywords.
+    Returns None if the name doesn't fit the pattern.
+    """
+    words = business_name.strip().split()
+    if len(words) < 2:
+        return None
+    first, last = words[0], words[1]
+    # Both words must be purely alphabetic, capitalized, and not business jargon.
+    if not (first.isalpha() and last.isalpha()):
+        return None
+    if not (first[0].isupper() and last[0].isupper()):
+        return None
+    if first.lower() in _BUSINESS_WORDS or last.lower() in _BUSINESS_WORDS:
+        return None
+    return f"{first} {last}"
+
 
 def _build_phase_list(state: CampaignState) -> list[PhaseFn]:
     """Build the ordered list of phases to run based on campaign toggles."""
@@ -52,6 +83,11 @@ def _research_one(
     """Run phases sequentially, short-circuit on first high/medium confidence."""
     if not lead.kept or not lead.business_name:
         return {"owner_full_name": "", "confidence": "none", "phase": "skipped"}
+
+    # Free pre-check: eponymous businesses ("Andrew Roby") — no API call needed.
+    eponymous = _eponymous_owner(lead.business_name)
+    if eponymous:
+        return {"owner_full_name": eponymous, "confidence": "medium", "phase": "name_heuristic"}
 
     for phase_fn in phases:
         try:

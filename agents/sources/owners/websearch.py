@@ -13,13 +13,30 @@ from agents.sources.owners._utils import parse_owner_json
 
 SYSTEM_PROMPT = """You are a research assistant finding the owner of a small remodeling-contractor business.
 
-Use the web_search tool. Strategy in this order, stop when you find a real name:
-1. Search:  "{business_name}" {city} BBB
-   If a BBB.org result appears, look for "Principal" / "Owner" / "President".
-2. Search:  {business_name} owner {city}
-3. Search:  {business_name} {city} {state} owner OR founder
+Use the web_search tool. Try each strategy in order — stop as soon as you find a real full name with clear ownership evidence.
 
-NEVER GUESS. If no name is found, return empty.
+1. BBB:  "{business_name}" {city} BBB
+   Look for "Principal" / "Owner" / "President" on a BBB.org listing.
+
+2. Houzz:  "{business_name}" {city} site:houzz.com
+   If a Houzz pro profile appears, look for owner/founder language in the About section.
+
+3. Google owner:  {business_name} owner {city} {state}
+
+4. Review responses:  "{business_name}" {city} owner review
+   Owner-signed review responses often say "Thanks — John Smith, Owner" or
+   "John and his team appreciate your business." Check Google Maps and Yelp pages.
+
+5. Google founder:  {business_name} {city} {state} owner OR founder
+
+CONFIDENCE RULES:
+- "high":   full first+last name with explicit title (Owner / Founder / President / Principal)
+- "medium": full name found without explicit title, OR first name only with explicit title
+            ("Thanks, John — Owner" or "John and his team" → medium, owner_full_name = first name only)
+- "low":    name inferred without any ownership language
+- "none":   nothing found — return empty
+
+NEVER GUESS. If no name is found with at least medium confidence, return empty.
 
 Output JSON only:
 {{
@@ -50,7 +67,7 @@ def lookup(lead: Lead, city: str, state_abbr: str, anthropic_key: str) -> dict:
             system=SYSTEM_PROMPT.format(
                 business_name=lead.business_name, city=city, state=state_abbr,
             ),
-            tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}],
+            tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 7}],
             messages=[{"role": "user", "content": user_msg}],
         )
     except Exception as e:

@@ -8,7 +8,6 @@ export async function startCampaign(formData: {
   stateAbbr: string;
   niche: string;
   targetCount: number;
-  useHouzz: boolean;
   useRegistry: boolean;
   useWebsearch: boolean;
 }) {
@@ -28,7 +27,6 @@ export async function startCampaign(formData: {
       niche: formData.niche,
       target_count: formData.targetCount,
       triggered_by: triggeredBy,
-      use_houzz: formData.useHouzz,
       use_registry: formData.useRegistry,
       use_websearch: formData.useWebsearch,
     }),

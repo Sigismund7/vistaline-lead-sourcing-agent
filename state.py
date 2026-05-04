@@ -59,7 +59,6 @@ class CampaignState:
     niche: str = ""
     target_count: int = 50
     triggered_by: str = "DG"
-    use_houzz: bool = True
     use_registry: bool = True
     use_websearch: bool = True
     status: str = "running"
@@ -82,7 +81,6 @@ class CampaignState:
             "niche": self.niche,
             "target_count": self.target_count,
             "triggered_by": self.triggered_by,
-            "use_houzz": self.use_houzz,
             "use_registry": self.use_registry,
             "use_websearch": self.use_websearch,
             "status": self.status,
@@ -180,7 +178,6 @@ class CampaignState:
             niche=row["niche"],
             target_count=row["target_count"],
             triggered_by=row.get("triggered_by", "DG"),
-            use_houzz=row.get("use_houzz", True),
             use_registry=row.get("use_registry", True),
             use_websearch=row.get("use_websearch", True),
             status=row.get("status", "running"),

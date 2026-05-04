@@ -31,7 +31,6 @@ export default function NewCampaignPage() {
   const [keywordVariants, setKeywordVariants] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [useHouzz, setUseHouzz] = useState(true);
   const [useRegistry, setUseRegistry] = useState(true);
   const [useWebsearch, setUseWebsearch] = useState(true);
 
@@ -71,7 +70,7 @@ export default function NewCampaignPage() {
     if (!niche) { setError("Please select a niche."); return; }
     setSubmitting(true);
     try {
-      await startCampaign({ city: city.trim(), stateAbbr, niche, targetCount: count, useHouzz, useRegistry, useWebsearch });
+      await startCampaign({ city: city.trim(), stateAbbr, niche, targetCount: count, useRegistry, useWebsearch });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start campaign. Try again.");
       setSubmitting(false);
@@ -262,13 +261,6 @@ export default function NewCampaignPage() {
           <CardContent className="space-y-3">
             {[
               {
-                id: "use-houzz",
-                label: "Houzz lookup",
-                desc: "Free — scrapes Houzz profiles for owner name.",
-                value: useHouzz,
-                set: setUseHouzz,
-              },
-              {
                 id: "use-registry",
                 label: "Business registry",
                 desc: "Free — OpenCorporates officer lookup (50/day free tier).",
@@ -278,7 +270,7 @@ export default function NewCampaignPage() {
               {
                 id: "use-websearch",
                 label: "Web search fallback",
-                desc: "~$0.04/lead — BBB + Google via AI web search.",
+                desc: "~$0.05/lead — BBB, Houzz, Google, review responses via AI search.",
                 value: useWebsearch,
                 set: setUseWebsearch,
               },

@@ -6,13 +6,14 @@ import re
 
 def parse_owner_json(text: str) -> dict:
     """Extract JSON owner dict from a Claude response, robust to code fences."""
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-        text = text.strip()
-    match = re.search(r"\{[^{}]*?\"owner_full_name\".*?\}", text, re.DOTALL)
-    raw = match.group(0) if match else text
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        inner = stripped.split("```", 2)[1].strip()
+        if inner.startswith("json"):
+            inner = inner[4:].strip()
+        stripped = inner
+    match = re.search(r"\{[^{}]*?\"owner_full_name\".*?\}", stripped, re.DOTALL)
+    raw = match.group(0) if match else stripped
     try:
         return json.loads(raw)
     except json.JSONDecodeError:

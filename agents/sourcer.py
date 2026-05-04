@@ -35,6 +35,7 @@ from tools import AzureMapsClient, BraveSearchClient, YelpFusionClient
 from agents.sources import azure_maps as azure_source
 from agents.sources import yelp_fusion as yelp_source
 from agents.website_finder import find_website
+from agents import leads_cache
 
 
 # Number of source adapters fanned out in parallel. Two for now (Azure +
@@ -310,11 +311,29 @@ def run(state: CampaignState, _unused_places_key: str | None = None) -> None:
     # ---- 4. Website backfill --------------------------------------------- #
     deduped = _enrich_websites(deduped, state)
 
+    # ---- 4.5 Cross-run dedup cache --------------------------------------- #
+    try:
+        deduped = leads_cache.filter_unseen(
+            deduped, state.city, state.state_abbr, CONFIG.leads_cache_ttl_days
+        )
+    except Exception as exc:
+        state.info("sourcer", "leads_cache.filter_unseen error (non-fatal)", error=str(exc))
+
     # ---- 5. Convert + persist -------------------------------------------- #
+    new_leads: list[dict] = []
     for normalized in deduped:
         if len(state.leads) >= state.target_count:
             break
         state.leads.append(_to_lead(normalized))
+        new_leads.append(normalized)
+
+    leads_cache.mark_seen(new_leads, state.city, state.state_abbr, state.campaign_id)
+
+    if len(new_leads) < state.target_count:
+        state.info(
+            "sourcer", "cache filtered short",
+            found=len(new_leads), target=state.target_count,
+        )
 
     state.info("sourcer", "done", final_count=len(state.leads))
     state.mark_done("sourcer")

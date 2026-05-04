@@ -71,6 +71,10 @@ class Config:
     # is conservative — calibrate during smoke testing if needed.
     dedup_match_threshold: int = 85
 
+    # ---- Cross-run dedup cache ----
+    # Leads seen for this city+state within ttl_days are skipped on re-sourcing.
+    leads_cache_ttl_days: int = 30
+
     # ---- Personalizer (post-FindyMail X/Y + LinkedIn) ----
     personalizer_max_parallel: int = 4
     personalizer_vision_model: str = "claude-sonnet-4-20250514"

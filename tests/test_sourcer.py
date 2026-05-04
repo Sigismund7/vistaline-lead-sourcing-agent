@@ -54,10 +54,14 @@ class SourcerRunTest(unittest.TestCase):
     def setUp(self) -> None:
         self.state = _make_state()
         # Patch client constructors so no real .env keys / HTTP fire.
+        # Patch leads_cache so tests don't bleed into the real state/leads_cache.db.
+        import agents.leads_cache as lc
         self._patches = [
             patch("agents.sourcer.AzureMapsClient", MagicMock()),
             patch("agents.sourcer.YelpFusionClient", MagicMock()),
             patch("agents.sourcer.BraveSearchClient", MagicMock()),
+            patch.object(lc, "filter_unseen", side_effect=lambda leads, *a, **kw: leads),
+            patch.object(lc, "mark_seen"),
         ]
         for p in self._patches:
             p.start()
@@ -292,6 +296,45 @@ class SourcerRunTest(unittest.TestCase):
             sourcer.run(self.state)
             self.assertEqual(len(self.state.leads), 1)
             self.assertEqual(self.state.leads[0].business_name, "Survivor Co")
+            self.assertTrue(self.state.is_done("sourcer"))
+
+
+    def test_run_logs_cache_filtered_short_when_all_filtered(self):
+        """When leads_cache returns [], sourcer logs 'cache filtered short'."""
+        import agents.leads_cache as lc
+        from unittest.mock import patch as _patch
+        with patch("agents.sourcer.azure_source.source_leads") as mock_az, \
+             patch("agents.sourcer.yelp_source.source_leads") as mock_yp, \
+             patch("agents.sourcer.find_website", return_value=None), \
+             _patch.object(lc, "filter_unseen", return_value=[]), \
+             _patch.object(lc, "mark_seen"):
+            mock_az.return_value = [
+                _normalized(source="azure_maps", source_id="a1",
+                            business_name="Foo Inc", website="https://foo.com"),
+            ]
+            mock_yp.return_value = []
+            sourcer.run(self.state)
+            short_entries = [
+                e for e in self.state.log if "cache filtered short" in e.get("msg", "")
+            ]
+            self.assertTrue(short_entries, "expected 'cache filtered short' in state.log")
+
+    def test_run_does_not_crash_when_leads_cache_raises(self):
+        """An unexpected raise from filter_unseen does not crash the sourcer."""
+        import agents.leads_cache as lc
+        import sqlite3 as _sqlite3
+        from unittest.mock import patch as _patch
+        with patch("agents.sourcer.azure_source.source_leads") as mock_az, \
+             patch("agents.sourcer.yelp_source.source_leads") as mock_yp, \
+             patch("agents.sourcer.find_website", return_value=None), \
+             _patch.object(lc, "filter_unseen",
+                           side_effect=_sqlite3.OperationalError("disk full")):
+            mock_az.return_value = [
+                _normalized(source="azure_maps", source_id="a1",
+                            business_name="Foo Inc", website="https://foo.com"),
+            ]
+            mock_yp.return_value = []
+            sourcer.run(self.state)  # must not raise
             self.assertTrue(self.state.is_done("sourcer"))
 
 

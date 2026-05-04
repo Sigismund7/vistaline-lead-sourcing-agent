@@ -805,3 +805,101 @@ class HouzzClient:
         if about:
             return about.get_text(separator=" ", strip=True)[:4000]
         return " ".join(p.get_text(strip=True) for p in soup.find_all("p"))[:4000]
+
+
+# --------------------------------------------------------------------------- #
+# OpenCorporates client                                                       #
+# --------------------------------------------------------------------------- #
+
+
+class OpenCorporatesClient:
+    """Client for the OpenCorporates v0.4 companies API.
+
+    Used by Phase 3 of owner_researcher to look up LLC/Corp officer names.
+    Handles 429 rate-limit gracefully (returns []) so the caller can fall
+    through to the next phase.
+
+    Free tier: 50 lookups/day unauthenticated (or with free API key).
+    Paid tier ($0.50/1000): set OPENCORPORATES_API_KEY. See spec alert.
+
+    Not thread-safe; construct one per worker thread (CLAUDE.md rule).
+    """
+
+    BASE_URL = "https://api.opencorporates.com/v0.4"
+
+    ROLE_PRIORITY = ["owner", "president", "ceo", "principal", "founder", "manager", "director"]
+
+    def __init__(self, api_key: str = "", timeout_s: int = 15) -> None:
+        self._api_key = api_key
+        self._timeout = timeout_s
+        self._session = requests.Session()
+
+    def search_company_officers(
+        self, business_name: str, state_abbr: str
+    ) -> list[dict]:
+        """Search for a company and return its current officers.
+
+        Returns a list of dicts with keys: name (str), role (str), is_current (bool).
+        Returns [] on 429, network error, no results, or parse failure.
+        """
+        params: dict[str, Any] = {
+            "q": business_name,
+            "jurisdiction_code": f"us_{state_abbr.lower()}",
+            "include_officers": "true",
+        }
+        if self._api_key:
+            params["api_token"] = self._api_key
+
+        try:
+            resp = self._session.get(
+                f"{self.BASE_URL}/companies/search",
+                params=params,
+                timeout=self._timeout,
+            )
+        except requests.RequestException:
+            return []
+
+        if resp.status_code == 429:
+            return []
+        if not resp.ok:
+            return []
+
+        try:
+            data = resp.json()
+        except ValueError:
+            return []
+
+        companies = data.get("results", {}).get("companies") or []
+        if not companies:
+            return []
+
+        company = companies[0].get("company", {})
+        officers_raw = company.get("officers") or []
+        return [
+            {
+                "name": o.get("officer", {}).get("name", ""),
+                "role": (
+                    o.get("officer", {}).get("position")
+                    or o.get("officer", {}).get("title")
+                    or ""
+                ).lower(),
+                "is_current": o.get("officer", {}).get("end_date") is None,
+            }
+            for o in officers_raw
+            if o.get("officer", {}).get("name")
+        ]
+
+    def pick_best_officer(self, officers: list[dict]) -> str | None:
+        """Return the name of the highest-priority current officer, or None.
+
+        Priority: owner > president > ceo > principal > founder > manager > director.
+        Falls back to any current officer if no priority role matches.
+        """
+        if not officers:
+            return None
+        current = [o for o in officers if o.get("is_current", True)] or officers
+        for role_keyword in self.ROLE_PRIORITY:
+            for o in current:
+                if role_keyword in o.get("role", "").lower():
+                    return o["name"] or None
+        return current[0]["name"] or None

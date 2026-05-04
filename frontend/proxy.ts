@@ -7,8 +7,9 @@ export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (PUBLIC.some((p) => pathname.startsWith(p))) return NextResponse.next();
 
+  const secret = process.env.SESSION_SECRET;
   const session = req.cookies.get("session")?.value;
-  if (session !== process.env.SESSION_SECRET) {
+  if (!secret || session !== secret) {
     return NextResponse.redirect(new URL("/login", req.url));
   }
   return NextResponse.next();

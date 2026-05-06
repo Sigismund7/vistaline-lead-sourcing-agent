@@ -2,21 +2,13 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-
-def _normalise_domain(raw: str) -> str:
-    """Strip protocol, www., and trailing slashes. Lowercase. Copy of api/main.py helper."""
-    d = (raw or "").strip().lower()
-    for prefix in ("https://", "http://"):
-        if d.startswith(prefix):
-            d = d[len(prefix):]
-    if d.startswith("www."):
-        d = d[4:]
-    return d.rstrip("/")
+from api.main import _normalise_domain
 
 
 cases = [
     ("andrewroby.com",           "andrewroby.com"),
     ("www.andrewroby.com",       "andrewroby.com"),
+    ("http://andrewroby.com",    "andrewroby.com"),
     ("https://andrewroby.com",   "andrewroby.com"),
     ("https://www.andrewroby.com/", "andrewroby.com"),
     ("ANDREWROBY.COM",           "andrewroby.com"),

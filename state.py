@@ -42,6 +42,7 @@ class Lead:
     owner_last: str = ""
     owner_source: str = ""
     email: str = ""
+    yelp_id: str = ""
     # Personalization (post-FindyMail). Empty string means "not run yet".
     x_project: str = ""
     y_detail: str = ""
@@ -122,6 +123,7 @@ class CampaignState:
                 "owner_last": l.owner_last,
                 "owner_source": l.owner_source,
                 "email": l.email,
+                "yelp_id": l.yelp_id,
                 "x_project": l.x_project,
                 "y_detail": l.y_detail,
                 "y_source": l.y_source,
@@ -162,6 +164,7 @@ class CampaignState:
                 owner_last=r["owner_last"],
                 owner_source=r["owner_source"],
                 email=r["email"],
+                yelp_id=r.get("yelp_id", "") or "",
                 x_project=r.get("x_project", "") or "",
                 y_detail=r.get("y_detail", "") or "",
                 y_source=r.get("y_source", "") or "",

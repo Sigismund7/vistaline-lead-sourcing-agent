@@ -185,6 +185,8 @@ def download_findymail_csv(campaign_id: str, _: AuthDep):
     writer = csv.writer(buf)
     writer.writerow(["first_name", "last_name", "domain", "phone"])
     for r in rows:
+        if not (r.get("owner_first") and r.get("domain")):
+            continue
         writer.writerow([r["owner_first"], r["owner_last"], r["domain"], r["phone"]])
     return StreamingResponse(
         iter([buf.getvalue()]),

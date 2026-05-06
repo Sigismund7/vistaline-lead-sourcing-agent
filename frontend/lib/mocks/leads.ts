@@ -16,6 +16,9 @@ export const MOCK_LEADS: Lead[] = [
     kept: true,
     excludedByUser: false,
     rejectReason: "",
+    xProject: "",
+    yDetail: "",
+    personalizationStatus: "",
   },
   {
     id: "lead-002",
@@ -32,6 +35,9 @@ export const MOCK_LEADS: Lead[] = [
     kept: true,
     excludedByUser: false,
     rejectReason: "",
+    xProject: "",
+    yDetail: "",
+    personalizationStatus: "",
   },
   {
     id: "lead-003",
@@ -48,6 +54,9 @@ export const MOCK_LEADS: Lead[] = [
     kept: true,
     excludedByUser: false,
     rejectReason: "",
+    xProject: "",
+    yDetail: "",
+    personalizationStatus: "",
   },
   {
     id: "lead-004",
@@ -64,6 +73,9 @@ export const MOCK_LEADS: Lead[] = [
     kept: true,
     excludedByUser: false,
     rejectReason: "",
+    xProject: "",
+    yDetail: "",
+    personalizationStatus: "",
   },
   {
     id: "lead-005",
@@ -80,6 +92,9 @@ export const MOCK_LEADS: Lead[] = [
     kept: false,
     excludedByUser: false,
     rejectReason: "Multi-trade — also markets kitchen and full-home remodels",
+    xProject: "",
+    yDetail: "",
+    personalizationStatus: "",
   },
   {
     id: "lead-006",
@@ -96,6 +111,9 @@ export const MOCK_LEADS: Lead[] = [
     kept: true,
     excludedByUser: true,
     rejectReason: "",
+    xProject: "",
+    yDetail: "",
+    personalizationStatus: "",
   },
   {
     id: "lead-007",
@@ -112,6 +130,9 @@ export const MOCK_LEADS: Lead[] = [
     kept: true,
     excludedByUser: false,
     rejectReason: "",
+    xProject: "",
+    yDetail: "",
+    personalizationStatus: "",
   },
   {
     id: "lead-008",
@@ -128,6 +149,9 @@ export const MOCK_LEADS: Lead[] = [
     kept: false,
     excludedByUser: false,
     rejectReason: "Franchise — corporate ownership, not owner-operator",
+    xProject: "",
+    yDetail: "",
+    personalizationStatus: "",
   },
   {
     id: "lead-009",
@@ -144,6 +168,9 @@ export const MOCK_LEADS: Lead[] = [
     kept: true,
     excludedByUser: false,
     rejectReason: "",
+    xProject: "",
+    yDetail: "",
+    personalizationStatus: "",
   },
   {
     id: "lead-010",
@@ -160,5 +187,8 @@ export const MOCK_LEADS: Lead[] = [
     kept: true,
     excludedByUser: false,
     rejectReason: "",
+    xProject: "",
+    yDetail: "",
+    personalizationStatus: "",
   },
 ];

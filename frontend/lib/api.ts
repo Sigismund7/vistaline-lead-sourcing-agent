@@ -81,6 +81,27 @@ export function csvUrl(campaignId: string, type: "findymail" | "master"): string
   return `/api/proxy${path}`;
 }
 
+export function agencyCsvUrl(campaignId: string): string {
+  return `/api/proxy/campaigns/${campaignId}/leads/agency.csv`;
+}
+
+export async function uploadEnrichedCsv(
+  campaignId: string,
+  file: File,
+): Promise<{ ok: boolean; matched: number; unmatched: number }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`/api/proxy/campaigns/${campaignId}/enrich`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
 // ---- Transformers (snake_case DB → camelCase UI) ----
 
 function toCampaign(r: Record<string, unknown>): Campaign {
@@ -131,5 +152,8 @@ function toLead(r: Record<string, unknown>): Lead {
     kept: r.kept as boolean,
     excludedByUser: (r.excluded_by_user as boolean) ?? false,
     rejectReason: r.reject_reason as string,
+    xProject: (r.x_project as string) ?? "",
+    yDetail: (r.y_detail as string) ?? "",
+    personalizationStatus: (r.personalization_status as string) ?? "",
   };
 }

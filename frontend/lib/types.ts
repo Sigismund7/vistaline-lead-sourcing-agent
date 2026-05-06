@@ -1,4 +1,4 @@
-export type CampaignStatus = "queued" | "running" | "completed" | "failed";
+export type CampaignStatus = "queued" | "running" | "personalizing" | "completed" | "failed";
 
 export type StepName =
   | "sourcer"
@@ -68,4 +68,7 @@ export interface Lead {
   kept: boolean;
   excludedByUser: boolean;
   rejectReason: string;
+  xProject: string;
+  yDetail: string;
+  personalizationStatus: string;
 }

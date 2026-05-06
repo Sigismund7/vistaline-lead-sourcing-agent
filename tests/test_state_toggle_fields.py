@@ -6,16 +6,14 @@ from state import CampaignState
 
 def test_toggle_defaults():
     state = CampaignState(campaign_id="test-001", city="Tampa", state_abbr="FL", niche="Kitchen")
-    assert state.use_houzz is True
     assert state.use_registry is True
     assert state.use_websearch is True
 
 def test_toggle_false():
     state = CampaignState(
         campaign_id="test-002", city="Tampa", state_abbr="FL", niche="Kitchen",
-        use_houzz=False, use_registry=False, use_websearch=False,
+        use_registry=False, use_websearch=False,
     )
-    assert state.use_houzz is False
     assert state.use_registry is False
     assert state.use_websearch is False
 

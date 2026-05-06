@@ -24,7 +24,7 @@ def _db() -> SupabaseClient:
 class Lead:
     """One lead as it evolves through the pipeline.
 
-    Sourcer fills:          business_name, phone, website, address, area_code, domain, place_id
+    Sourcer fills:          business_name, phone, website, address, area_code, domain, place_id, yelp_id
     Lead filter fills:      kept, reject_reason
     Owner researcher fills: owner_full_name, owner_first, owner_last, owner_source, email
     """

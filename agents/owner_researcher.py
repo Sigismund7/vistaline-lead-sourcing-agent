@@ -1,17 +1,19 @@
 """Owner Researcher — finds the owner's full name for every kept lead.
 
-Three-phase strategy per lead, phases run sequentially and short-circuit on
-the first high/medium-confidence result. Each phase is independently
+Four-phase strategy per lead, phases run sequentially and short-circuit on
+the first high/medium-confidence result. Phases 2 and 3 are independently
 toggleable from the campaign row (use_registry, use_websearch).
-Phase 1 (website crawl) always runs.
+Phases 1 and 4 (yelp_profile and website crawl) always run.
 
+  Phase 0: yelp_profile.lookup   — Yelp Business Owner labeled field. Free.
   Phase 1: website.lookup        — crawl own website, ask Claude. Free.
   Phase 2: opencorporates.lookup — OpenCorporates officer API. Free tier.
   Phase 3: websearch.lookup      — BBB + Houzz + Google + review responses
                                    via Claude web_search. ~$0.05/lead.
 
 Hit rate expectation (all phases on):
-  Phase 1 alone:          ~55%
+  Phase 0 alone:          ~10-15%
+  + Phase 1 (website):    ~55%
   + Phase 2 (OC):         ~65%
   + Phase 3 (web search): ~85-90%
 
@@ -22,7 +24,7 @@ import concurrent.futures as futures
 from typing import Callable
 
 from state import CampaignState, Lead
-from agents.sources.owners import website, opencorporates, websearch
+from agents.sources.owners import yelp_profile, website, opencorporates, websearch
 from agents.sources.owners._utils import split_name
 
 
@@ -79,8 +81,12 @@ def _eponymous_owner(business_name: str) -> str | None:
 
 
 def _build_phase_list(state: CampaignState) -> list[PhaseFn]:
-    """Build the ordered list of phases to run based on campaign toggles."""
-    phases: list[PhaseFn] = [website.lookup]
+    """Build the ordered list of phases to run based on campaign toggles.
+
+    yelp_profile always runs first — it's free (no LLM) and silently
+    falls through when Yelp is unavailable or the owner field is absent.
+    """
+    phases: list[PhaseFn] = [yelp_profile.lookup, website.lookup]
     if state.use_registry:
         phases.append(opencorporates.lookup)
     if state.use_websearch:

@@ -117,11 +117,6 @@ def _research_one(
 
 def run(state: CampaignState, anthropic_key: str) -> None:
     """Research owner names for all kept leads with no existing owner name."""
-    if state.is_done("owner_researcher"):
-        found = sum(1 for l in state.leads if l.owner_full_name)
-        state.info("owner_researcher", f"already complete, skipping ({found} found)")
-        return
-
     phases = _build_phase_list(state)
     phase_names = [fn.__module__.split(".")[-1] for fn in phases]
     targets = [l for l in state.leads if l.kept and not l.owner_full_name]
@@ -177,4 +172,3 @@ def run(state: CampaignState, anthropic_key: str) -> None:
         not_found=not_found,
         pre_enriched=pre_enriched,
     )
-    state.mark_done("owner_researcher")

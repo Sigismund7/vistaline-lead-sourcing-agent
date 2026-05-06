@@ -104,12 +104,18 @@ def run_personalize(enriched_csv: str, *, triggered_by: str) -> int:
 
 
 def banner(state: CampaignState) -> None:
+    from agents.cost_estimator import estimate as _estimate
+    est = _estimate(target_named=state.target_count)
+    raw_str = f"~{est.estimated_raw_to_source} businesses"
+    cost_str = f"~${est.total_usd:.2f} (Anthropic API est.)"
     print()
     print("┌" + "─" * 58 + "┐")
-    print(f"│  Vistaline Lead-Gen — {state.campaign_id:<33}│")
+    print(f"│  Vistaline Lead-Gen — {state.campaign_id:<35}│")
     print(f"│  city:   {state.city + ', ' + state.state_abbr:<48}│")
     print(f"│  niche:  {state.niche:<48}│")
-    print(f"│  target: {state.target_count:<48}│")
+    print(f"│  target: {str(state.target_count) + ' leads with owner names':<48}│")
+    print(f"│  raw:    {raw_str:<48}│")
+    print(f"│  cost:   {cost_str:<48}│")
     print("└" + "─" * 58 + "┘")
 
 

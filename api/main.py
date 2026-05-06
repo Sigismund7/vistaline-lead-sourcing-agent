@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from agents.csv_agency import AGENCY_COLUMNS
+from agents.cost_estimator import estimate as _cost_estimate
 from api.deps import get_supabase, verify_api_key
 from api.runner import run_pipeline
 from api.runner_personalize import run_personalization
@@ -67,6 +68,21 @@ def list_campaigns(_: AuthDep):
         .data
     )
     return rows
+
+
+@app.get("/estimate")
+def get_estimate(_: AuthDep, count: int = 50, keep_rate: float = 0.45):
+    """Return projected Anthropic API cost for a planned run."""
+    est = _cost_estimate(target_named=count, keep_rate=keep_rate)
+    return {
+        "target_named_leads": est.target_named_leads,
+        "estimated_raw_to_source": est.estimated_raw_to_source,
+        "estimated_kept": est.estimated_kept,
+        "lead_filter_usd": est.lead_filter_usd,
+        "owner_phase1_usd": est.owner_phase1_usd,
+        "owner_phase3_usd": est.owner_phase3_usd,
+        "total_usd": est.total_usd,
+    }
 
 
 @app.post("/campaigns", status_code=201)

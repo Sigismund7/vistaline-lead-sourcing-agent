@@ -8,7 +8,7 @@ import io
 from datetime import date
 from typing import Annotated
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -16,6 +16,18 @@ from pydantic import BaseModel
 from agents.csv_agency import AGENCY_COLUMNS
 from api.deps import get_supabase, verify_api_key
 from api.runner import run_pipeline
+from api.runner_personalize import run_personalization
+
+
+def _normalise_domain(raw: str) -> str:
+    """Strip protocol, www., and trailing slash; lowercase. Used to match enriched CSV to leads."""
+    d = (raw or "").strip().lower()
+    for prefix in ("https://", "http://"):
+        if d.startswith(prefix):
+            d = d[len(prefix):]
+    if d.startswith("www."):
+        d = d[4:]
+    return d.rstrip("/")
 from state import CampaignState
 
 app = FastAPI(title="Vistaline Lead Sourcer API", version="1.0.0")
@@ -234,3 +246,71 @@ def download_agency_csv(campaign_id: str, _: AuthDep):
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="agency-{campaign_id}.csv"'},
     )
+
+
+@app.post("/campaigns/{campaign_id}/enrich", status_code=202)
+async def enrich_campaign(
+    campaign_id: str,
+    file: UploadFile,
+    background_tasks: BackgroundTasks,
+    _: AuthDep,
+):
+    """Accept a FindyMail-returned CSV, write emails onto leads by domain, start personalizer."""
+    db = get_supabase()
+
+    campaign_row = db.table("campaigns").select("id").eq("id", campaign_id).execute().data
+    if not campaign_row:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    try:
+        content = (await file.read()).decode("utf-8")
+        reader = csv.DictReader(io.StringIO(content))
+        enriched_rows = list(reader)
+    except Exception:
+        raise HTTPException(status_code=422, detail="Could not parse CSV — check encoding and format")
+
+    if not enriched_rows:
+        raise HTTPException(status_code=422, detail="CSV is empty")
+
+    # Build domain → email lookup from the enriched CSV.
+    domain_to_email: dict[str, str] = {}
+    for r in enriched_rows:
+        lower = {k.lower().strip(): v for k, v in r.items()}
+        domain = _normalise_domain(lower.get("domain", ""))
+        email = (lower.get("email") or lower.get("owner email") or "").strip()
+        if domain and email:
+            domain_to_email[domain] = email
+
+    if not domain_to_email:
+        raise HTTPException(
+            status_code=422,
+            detail="No email+domain pairs found — wrong file or FindyMail returned no results",
+        )
+
+    # Load campaign leads and match by domain.
+    lead_rows = (
+        db.table("leads")
+        .select("id, domain")
+        .eq("campaign_id", campaign_id)
+        .execute()
+        .data
+    )
+
+    matched = 0
+    for lead in lead_rows:
+        norm = _normalise_domain(lead.get("domain") or "")
+        email = domain_to_email.get(norm)
+        if email:
+            db.table("leads").update({"email": email}).eq("id", lead["id"]).execute()
+            matched += 1
+
+    if matched == 0:
+        raise HTTPException(
+            status_code=422,
+            detail="No leads matched by domain — is this the right campaign or file?",
+        )
+
+    db.table("campaigns").update({"status": "personalizing"}).eq("id", campaign_id).execute()
+    background_tasks.add_task(run_personalization, campaign_id)
+
+    return {"ok": True, "matched": matched, "unmatched": len(enriched_rows) - matched}

@@ -11,11 +11,9 @@ pipeline continues to Phase 1 (website crawl).
 from __future__ import annotations
 
 import json
-import time
-import random
 
-import requests
 from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout, Error as PlaywrightError
 from rapidfuzz import fuzz
 
 from config import CONFIG
@@ -23,19 +21,9 @@ from state import Lead
 from tools import YelpFusionClient
 
 
-_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
-)
-_HEADERS = {
-    "User-Agent": _USER_AGENT,
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-}
 _SEARCH_CATEGORIES = "contractors,kitchen_and_bath,homeservices"
 _FUZZY_THRESHOLD = 85
-_PAGE_FETCH_TIMEOUT_S = 15
+_PAGE_FETCH_TIMEOUT_MS = 15_000
 
 
 def _resolve_yelp_id(lead: Lead, city: str, state_abbr: str, yelp_key: str) -> str | None:
@@ -80,24 +68,36 @@ def _resolve_yelp_id(lead: Lead, city: str, state_abbr: str, yelp_key: str) -> s
 
 
 def _fetch_yelp_page(yelp_id: str) -> str | None:
-    """Fetch the Yelp business profile page HTML.
+    """Fetch the fully-rendered Yelp business profile page HTML via Playwright.
 
-    Returns None on any HTTP error or timeout so callers can silently
-    fall through to the next owner-research phase.
+    Uses headless Chromium so Yelp's Cloudflare bot-detection sees a real
+    browser rather than a plain HTTP client. Returns None on timeout, nav
+    error, or any Playwright exception so callers fall through silently.
     """
     url = f"https://www.yelp.com/biz/{yelp_id}"
-    time.sleep(random.uniform(0.5, 1.5))
     try:
-        resp = requests.get(url, headers=_HEADERS, timeout=_PAGE_FETCH_TIMEOUT_S)
-    except requests.RequestException:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                context = browser.new_context(
+                    locale="en-US",
+                    viewport={"width": 1280, "height": 800},
+                )
+                page = context.new_page()
+                page.set_default_timeout(_PAGE_FETCH_TIMEOUT_MS)
+                resp = page.goto(url, wait_until="domcontentloaded")
+                if resp is None or not resp.ok:
+                    return None
+                # Wait briefly for any deferred React hydration that may inject
+                # the Business Owner section after the initial DOM paint.
+                page.wait_for_timeout(800)
+                return page.content()
+            finally:
+                browser.close()
+    except (PlaywrightTimeout, PlaywrightError):
         return None
-
-    if resp.status_code in (403, 429, 503):
+    except Exception:
         return None
-    if not resp.ok:
-        return None
-
-    return resp.text
 
 
 def _parse_owner_from_jsonld(html: str) -> str | None:

@@ -39,16 +39,21 @@ Respond with valid JSON only — no markdown, no commentary. Format:
 
 
 def run(state: CampaignState, anthropic_key: str, batch_size: int = 25) -> None:
-    if state.is_done("lead_filter"):
-        kept = sum(1 for l in state.leads if l.kept)
-        state.info("lead_filter", f"already complete, skipping ({kept} kept)")
+    """Filter leads that have not yet been processed (filter_done=False).
+
+    Idempotent: if all leads are already filtered, returns immediately.
+    Designed to be called multiple times in the quota loop — each call
+    processes only the new unfiltered leads added since the last call.
+    """
+    targets = [l for l in state.leads if not l.filter_done]
+    if not targets:
         return
 
     client = Anthropic(api_key=anthropic_key)
-    state.info("lead_filter", f"filtering {len(state.leads)} leads in batches of {batch_size}")
+    state.info("lead_filter", f"filtering {len(targets)} new leads in batches of {batch_size}")
 
-    for batch_start in range(0, len(state.leads), batch_size):
-        batch = state.leads[batch_start:batch_start + batch_size]
+    for batch_start in range(0, len(targets), batch_size):
+        batch = targets[batch_start : batch_start + batch_size]
         items = [
             {
                 "index": i,
@@ -74,7 +79,6 @@ def run(state: CampaignState, anthropic_key: str, batch_size: int = 25) -> None:
             messages=[{"role": "user", "content": user_msg}],
         )
         text = response.content[0].text.strip()
-        # Strip code fences if Claude added them despite instructions
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):
@@ -83,21 +87,23 @@ def run(state: CampaignState, anthropic_key: str, batch_size: int = 25) -> None:
 
         try:
             parsed = json.loads(text)
+            for d in parsed.get("decisions", []):
+                local_idx = d.get("index")
+                if local_idx is None or local_idx >= len(batch):
+                    continue
+                lead = batch[local_idx]
+                lead.kept = bool(d.get("kept", True))
+                lead.reject_reason = d.get("reason", "") if not lead.kept else ""
         except json.JSONDecodeError as e:
             state.info("lead_filter", f"WARN: bad JSON in batch {batch_start}, keeping all", error=str(e))
-            continue
 
-        for d in parsed.get("decisions", []):
-            local_idx = d.get("index")
-            if local_idx is None or local_idx >= len(batch):
-                continue
-            lead = batch[local_idx]
-            lead.kept = bool(d.get("kept", True))
-            lead.reject_reason = d.get("reason", "") if not lead.kept else ""
+        # Mark all leads in this batch as processed regardless of JSON parse outcome.
+        # Unprocessed leads remain at their default kept=True.
+        for lead in batch:
+            lead.filter_done = True
 
         kept_in_batch = sum(1 for l in batch if l.kept)
         state.info("lead_filter", f"batch {batch_start}: {kept_in_batch}/{len(batch)} kept")
 
     total_kept = sum(1 for l in state.leads if l.kept)
     state.info("lead_filter", f"done: {total_kept}/{len(state.leads)} kept overall")
-    state.mark_done("lead_filter")

@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from agents.csv_agency import AGENCY_COLUMNS
 from api.deps import get_supabase, verify_api_key
 from api.runner import run_pipeline
 from state import CampaignState
@@ -197,6 +198,9 @@ def download_master_csv(campaign_id: str, _: AuthDep):
 def download_agency_csv(campaign_id: str, _: AuthDep):
     """Agency-format CSV: 13 columns, Instantly-ready."""
     db = get_supabase()
+    campaign_row = db.table("campaigns").select("id").eq("id", campaign_id).execute().data
+    if not campaign_row:
+        raise HTTPException(status_code=404, detail="Campaign not found")
     rows = (
         db.table("leads")
         .select("*")
@@ -207,11 +211,7 @@ def download_agency_csv(campaign_id: str, _: AuthDep):
     )
     today = date.today().isoformat()
     buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=[
-        "Total", "Lead Sourcer", "Business", "Owner Full Name",
-        "First", "Last", "Owner Email", "LinkedIn", "Website",
-        "Phone", "Date", "X Project", "Y Detail",
-    ])
+    writer = csv.DictWriter(buf, fieldnames=AGENCY_COLUMNS)
     writer.writeheader()
     for i, r in enumerate(rows, start=1):
         writer.writerow({

@@ -13,7 +13,7 @@ from agents import personalizer, linkedin_finder
 
 async def run_personalization(campaign_id: str) -> None:
     """Launch personalization for campaign_id in a thread (non-blocking)."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, _run_sync, campaign_id)
 
 
@@ -26,6 +26,7 @@ def _run_sync(campaign_id: str) -> None:
             s for s in state.completed_steps
             if s not in (personalizer.STEP_NAME, linkedin_finder.STEP_NAME)
         ]
+        state.info("runner_personalize", "Personalization started")
         personalizer.run(
             state,
             CONFIG.anthropic_key,

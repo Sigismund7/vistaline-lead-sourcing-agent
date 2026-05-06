@@ -17,6 +17,7 @@ from agents.csv_agency import AGENCY_COLUMNS
 from api.deps import get_supabase, verify_api_key
 from api.runner import run_pipeline
 from api.runner_personalize import run_personalization
+from state import CampaignState
 
 
 def _normalise_domain(raw: str) -> str:
@@ -28,7 +29,6 @@ def _normalise_domain(raw: str) -> str:
     if d.startswith("www."):
         d = d[4:]
     return d.rstrip("/")
-from state import CampaignState
 
 app = FastAPI(title="Vistaline Lead Sourcer API", version="1.0.0")
 

@@ -57,3 +57,5 @@ state/leads_cache.db
 *.log
 .gstack/
 .playwright-mcp/
+.superpowers/
+frontend/public/qa-*.png

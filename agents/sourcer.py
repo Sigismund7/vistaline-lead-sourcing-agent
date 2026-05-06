@@ -221,6 +221,8 @@ def _to_lead(normalized: dict) -> Lead:
     `place_id` is mapped from `source_id` (legacy field name; `Lead` was
     designed when Google Places was the only source). `domain` and
     `area_code` are derived helpers consistent with the pre-Cycle-4 sourcer.
+    `yelp_id` is the Yelp business alias, available when the source includes
+    Yelp data — used by the yelp_profile owner-research phase.
 
     Defensive contract: optional fields (phone, website, address, lat, lon,
     raw) default to empty strings when missing — a buggy adapter returning
@@ -231,6 +233,18 @@ def _to_lead(normalized: dict) -> Lead:
     """
     website = normalized.get("website", "") or ""
     phone = normalized.get("phone", "") or ""
+    source = normalized.get("source", "")
+
+    # Determine Yelp alias. Yelp-only leads carry it as source_id.
+    # Merged leads carry the Azure ID as source_id but the Yelp raw dict
+    # is attached as raw_yelp by the merge step in _merge_sources().
+    if source == "yelp_fusion":
+        yelp_id = normalized.get("source_id", "") or ""
+    elif source == "azure_maps+yelp_fusion":
+        yelp_id = (normalized.get("raw_yelp") or {}).get("id", "") or ""
+    else:
+        yelp_id = ""
+
     return Lead(
         business_name=normalized.get("business_name", "") or "",
         phone=phone,
@@ -239,6 +253,7 @@ def _to_lead(normalized: dict) -> Lead:
         area_code=_area_code(phone),
         domain=_normalize_domain(website),
         place_id=normalized.get("source_id", "") or "",
+        yelp_id=yelp_id,
     )
 
 

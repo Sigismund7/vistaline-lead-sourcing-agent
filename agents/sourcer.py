@@ -242,32 +242,33 @@ def _to_lead(normalized: dict) -> Lead:
     )
 
 
-def run(state: CampaignState, _unused_places_key: str | None = None) -> None:
+def run(
+    state: CampaignState,
+    _unused_places_key: str | None = None,
+    *,
+    round_n: int = 0,
+    batch_size: int | None = None,
+) -> int:
     """Source contractor leads via Azure Maps + Yelp Fusion in parallel.
 
-    Steps:
-      1. Short-circuit if state.is_done("sourcer") — preserves resume.
-      2. Fanout: ThreadPoolExecutor(2) with one Azure worker + one Yelp worker.
-         Each worker constructs its own client (thread-safety rule).
-      3. Dedupe cross-source via rapidfuzz token_sort_ratio at the
-         CONFIG.dedup_match_threshold ceiling. Azure wins on tie.
-      4. For each surviving lead with empty website, call website_finder
-         with one shared Brave client + requests.Session.
-      5. Convert dicts to Lead dataclasses, append to state.leads up to
-         target_count, mark_done.
+    Returns the count of new leads added in this round. Returns 0 if this
+    round was already completed (resume case) or if no unseen leads remain.
 
-    The second positional argument is accepted for backward-compat with
-    run.py (which still passes the legacy Google Places API key) but is
-    ignored — Google Places is no longer the source.
+    round_n: which sourcing round this is (0-indexed). Step name is
+        ``sourcer_round_{round_n}`` so resume works across multiple rounds.
+    batch_size: max new leads to add this round. Defaults to state.target_count.
     """
-    if state.is_done("sourcer"):
-        state.info("sourcer", f"already complete, skipping ({len(state.leads)} leads)")
-        return
+    step = f"sourcer_round_{round_n}"
+    if state.is_done(step):
+        state.info("sourcer", f"round {round_n} already complete, skipping")
+        return 0
+
+    effective_batch = batch_size if batch_size is not None else state.target_count
 
     state.info(
         "sourcer",
-        "starting",
-        target=state.target_count,
+        f"round {round_n} starting",
+        target=effective_batch,
         niche=state.niche,
         location=f"{state.city}, {state.state_abbr}",
     )
@@ -280,11 +281,11 @@ def run(state: CampaignState, _unused_places_key: str | None = None) -> None:
         future_yelp = pool.submit(_source_via_yelp, state)
         try:
             azure_results = future_azure.result()
-        except Exception as e:  # external-source failure: log and continue
+        except Exception as e:
             state.info("sourcer", "azure source failed", error=f"{type(e).__name__}: {e}")
         try:
             yelp_results = future_yelp.result()
-        except Exception as e:  # external-source failure: log and continue
+        except Exception as e:
             state.info("sourcer", "yelp source failed", error=f"{type(e).__name__}: {e}")
 
     state.info(
@@ -295,7 +296,6 @@ def run(state: CampaignState, _unused_places_key: str | None = None) -> None:
     )
 
     # ---- 3. Cross-source dedup ------------------------------------------- #
-    # Concatenate Azure first so it wins ties when survivors order is checked.
     combined = list(azure_results) + list(yelp_results)
     before = len(combined)
     deduped = _dedupe_cross_source(combined, threshold=CONFIG.dedup_match_threshold)
@@ -322,18 +322,18 @@ def run(state: CampaignState, _unused_places_key: str | None = None) -> None:
     # ---- 5. Convert + persist -------------------------------------------- #
     new_leads: list[dict] = []
     for normalized in deduped:
-        if len(state.leads) >= state.target_count:
+        if len(new_leads) >= effective_batch:
             break
         state.leads.append(_to_lead(normalized))
         new_leads.append(normalized)
 
     leads_cache.mark_seen(new_leads, state.city, state.state_abbr, state.campaign_id)
 
-    if len(new_leads) < state.target_count:
-        state.info(
-            "sourcer", "cache filtered short",
-            found=len(new_leads), target=state.target_count,
-        )
-
-    state.info("sourcer", "done", final_count=len(state.leads))
-    state.mark_done("sourcer")
+    state.info(
+        "sourcer",
+        f"round {round_n} done",
+        new_this_round=len(new_leads),
+        total_leads=len(state.leads),
+    )
+    state.mark_done(step)
+    return len(new_leads)

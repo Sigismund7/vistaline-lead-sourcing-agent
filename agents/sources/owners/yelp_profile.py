@@ -13,12 +13,12 @@ from __future__ import annotations
 import json
 import time
 import random
-import os
 
 import requests
 from bs4 import BeautifulSoup
 from rapidfuzz import fuzz
 
+from config import CONFIG
 from state import Lead
 from tools import YelpFusionClient
 
@@ -165,7 +165,7 @@ def lookup(lead: Lead, city: str, state_abbr: str, anthropic_key: str) -> dict:
     Returns a dict with at minimum: owner_full_name (str), confidence (str).
     confidence is 'high' on a labeled Yelp match, 'none' otherwise.
     """
-    yelp_key = os.environ.get("YELP_FUSION_KEY", "")
+    yelp_key = CONFIG.yelp_fusion_key
 
     yelp_id = _resolve_yelp_id(lead, city, state_abbr, yelp_key)
     if not yelp_id:

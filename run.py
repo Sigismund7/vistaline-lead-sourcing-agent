@@ -11,12 +11,28 @@ Usage:
 """
 from __future__ import annotations
 import argparse
+import math
 import sys
 import traceback
 
 from config import CONFIG
 from state import CampaignState
 from agents import sourcer, lead_filter, owner_researcher, csv_assembler
+
+
+MAX_SOURCING_ROUNDS = 5    # safety cap — prevents runaway spend if area has many businesses
+_KEEP_EST = 0.45           # estimated keep rate, used only to size per-round batch
+_HIT_EST = 0.65            # estimated owner-name hit rate, used only to size per-round batch
+
+
+def _named_count(state: CampaignState) -> int:
+    """Count leads that passed the filter and have an owner first name."""
+    return sum(1 for l in state.leads if l.kept and l.owner_first)
+
+
+def _leads_per_round(target: int) -> int:
+    """Raw leads to source per round so MAX_SOURCING_ROUNDS rounds at expected rates fills quota."""
+    return max(50, math.ceil(target / (_KEEP_EST * _HIT_EST) / MAX_SOURCING_ROUNDS * 1.2))
 
 
 def parse_args() -> argparse.Namespace:
@@ -148,36 +164,51 @@ def main() -> int:
     banner(state)
 
     try:
-        # 1. Sourcer — Google Places API
-        sourcer.run(state, CONFIG.google_places_key)
+        if state.is_done("pipeline_complete"):
+            print("Campaign already completed — nothing to do.")
+            return 0
 
-        # 2. Lead filter — Claude
-        lead_filter.run(state, CONFIG.anthropic_key)
+        batch = _leads_per_round(state.target_count)
+        state.info("run", f"quota loop: target={state.target_count} named, {batch} raw/round, max {MAX_SOURCING_ROUNDS} rounds")
 
-        # 3. Owner researcher — Claude + web_search, parallel
-        owner_researcher.run(state, CONFIG.anthropic_key)
+        for round_n in range(MAX_SOURCING_ROUNDS):
+            if not state.is_done(f"sourcer_round_{round_n}"):
+                new = sourcer.run(state, CONFIG.google_places_key, round_n=round_n, batch_size=batch)
+                if new == 0:
+                    state.mark_done("sourcer_exhausted")
+                    state.info("run", f"area exhausted after {round_n} sourcing rounds")
+                    break
 
-        # 4. CSV assembler — FindyMail-ready + master
+            lead_filter.run(state, CONFIG.anthropic_key)
+            owner_researcher.run(state, CONFIG.anthropic_key)
+
+            named = _named_count(state)
+            state.info("run", f"round {round_n} complete", named=named, target=state.target_count)
+
+            if named >= state.target_count or state.is_done("sourcer_exhausted"):
+                break
+
         findymail_path, master_path = csv_assembler.run(state)
-
-        # Persist all leads to Supabase so the web UI can show and export them.
         state.save_leads()
+        state.mark_done("pipeline_complete")
+        state.status = "completed"
+        state.save()
 
-        # Summary stats
         total = len(state.leads)
         kept = sum(1 for l in state.leads if l.kept)
-        with_owner = sum(1 for l in state.leads if l.kept and l.owner_first)
+        with_owner = _named_count(state)
         with_email = sum(1 for l in state.leads if l.kept and l.email)
-        ready = sum(1 for l in state.leads if l.kept and l.owner_first and l.domain)
+        exhausted_note = "  area exhausted before quota met\n" if state.is_done("sourcer_exhausted") else ""
 
         print()
         print("=" * 64)
         print(f"  ✅  DONE — campaign {state.campaign_id}")
         print(f"  scraped:           {total}")
         print(f"  kept after filter: {kept}")
-        print(f"  with owner name:   {with_owner}")
-        print(f"  with email already: {with_email}  (saved that many FindyMail credits)")
-        print(f"  ready for upload:  {ready}")
+        print(f"  with owner name:   {with_owner}/{state.target_count} (target)")
+        print(f"  with email:        {with_email}  (saved FindyMail credits)")
+        if exhausted_note:
+            print(exhausted_note, end="")
         print()
         print(f"  upload to FindyMail:  {findymail_path}")
         print(f"  full audit trail:     {master_path}")

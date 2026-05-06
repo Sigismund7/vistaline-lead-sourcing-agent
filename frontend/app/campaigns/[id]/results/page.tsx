@@ -44,7 +44,9 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
         .then((c) => {
           setCampaign(c);
           if (c.status === "completed" || c.status === "failed") {
-            getLeads(id).then(setLeads).catch(() => {});
+            getLeads(id).then(setLeads).catch(() => {
+              setUploadError("Personalization finished but could not refresh leads — please reload the page.");
+            });
           }
         })
         .catch(() => {});
@@ -64,11 +66,19 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
     );
   }, [leads, search]);
 
-  async function downloadCsv(type: "findymail" | "master") {
-    const url = type === "findymail"
-      ? `/api/proxy/campaigns/${id}/leads.csv`
-      : `/api/proxy/campaigns/${id}/leads/master.csv`;
-    const filename = type === "findymail" ? `findymail-${id}.csv` : `master-${id}.csv`;
+  async function downloadCsv(type: "findymail" | "master" | "agency") {
+    const url =
+      type === "findymail"
+        ? `/api/proxy/campaigns/${id}/leads.csv`
+        : type === "master"
+        ? `/api/proxy/campaigns/${id}/leads/master.csv`
+        : agencyCsvUrl(id);
+    const filename =
+      type === "findymail"
+        ? `findymail-${id}.csv`
+        : type === "master"
+        ? `master-${id}.csv`
+        : `agency-${id}.csv`;
     const res = await fetch(url);
     if (!res.ok) return;
     const blob = await res.blob();
@@ -153,11 +163,9 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
             <Download className="mr-2 size-4" /> FindyMail CSV
           </Button>
           {campaign?.status === "completed" && withEmail > 0 && (
-            <a href={agencyCsvUrl(id)} download={`agency-${id}.csv`}>
-              <Button>
-                <Sparkles className="mr-2 size-4" /> Agency CSV
-              </Button>
-            </a>
+            <Button onClick={() => downloadCsv("agency")}>
+              <Sparkles className="mr-2 size-4" /> Agency CSV
+            </Button>
           )}
           <Button
             variant="outline"
@@ -175,6 +183,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
             type="file"
             accept=".csv"
             className="hidden"
+            disabled={uploading || campaign?.status === "personalizing"}
             onChange={handleEnrichedUpload}
           />
         </div>

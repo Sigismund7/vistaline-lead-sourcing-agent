@@ -1,15 +1,15 @@
 "use client";
 
-import { use, useEffect, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Download, ExternalLink, Mail, Phone, Search, Loader2 } from "lucide-react";
+import { Download, ExternalLink, Mail, Phone, Search, Loader2, Sparkles, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { getCampaign, getLeads, patchLead } from "@/lib/api";
+import { getCampaign, getLeads, patchLead, agencyCsvUrl, uploadEnrichedCsv } from "@/lib/api";
 import type { Campaign, Lead } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +20,9 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,6 +36,21 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [id]);
+
+  useEffect(() => {
+    if (!campaign || campaign.status !== "personalizing") return;
+    const interval = setInterval(() => {
+      getCampaign(id)
+        .then((c) => {
+          setCampaign(c);
+          if (c.status === "completed" || c.status === "failed") {
+            getLeads(id).then(setLeads).catch(() => {});
+          }
+        })
+        .catch(() => {});
+    }, 10_000);
+    return () => clearInterval(interval);
+  }, [campaign?.status, id]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -72,6 +90,22 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
         prev.map((l) => (l.id === lead.id ? { ...l, excludedByUser: lead.excludedByUser } : l)),
       );
     });
+  }
+
+  async function handleEnrichedUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      await uploadEnrichedCsv(id, file);
+      setCampaign((c) => (c ? { ...c, status: "personalizing" } : c));
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   }
 
   if (loading) {
@@ -115,11 +149,48 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
           <Button variant="outline" onClick={() => downloadCsv("master")}>
             <Download className="mr-2 size-4" /> Master CSV
           </Button>
-          <Button onClick={() => downloadCsv("findymail")}>
+          <Button variant="outline" onClick={() => downloadCsv("findymail")}>
             <Download className="mr-2 size-4" /> FindyMail CSV
           </Button>
+          {campaign?.status === "completed" && withEmail > 0 && (
+            <a href={agencyCsvUrl(id)} download={`agency-${id}.csv`}>
+              <Button>
+                <Sparkles className="mr-2 size-4" /> Agency CSV
+              </Button>
+            </a>
+          )}
+          <Button
+            variant="outline"
+            disabled={uploading || campaign?.status === "personalizing"}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {uploading ? (
+              <><Loader2 className="mr-2 size-4 animate-spin" /> Uploading…</>
+            ) : (
+              <><Upload className="mr-2 size-4" /> Upload enriched CSV</>
+            )}
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            className="hidden"
+            onChange={handleEnrichedUpload}
+          />
         </div>
       </div>
+
+      {campaign?.status === "personalizing" && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-sm text-blue-400">
+          <Loader2 className="size-4 animate-spin" />
+          Personalization running — X Project, Y Detail, and LinkedIn being filled. Checking every 10 seconds…
+        </div>
+      )}
+      {uploadError && (
+        <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {uploadError}
+        </div>
+      )}
 
       <div className="grid gap-4 pb-8 sm:grid-cols-4">
         <Card>

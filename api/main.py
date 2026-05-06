@@ -5,6 +5,7 @@ All routes require X-Api-Key header matching VISTALINE_API_SECRET.
 from __future__ import annotations
 import csv
 import io
+from datetime import date
 from typing import Annotated
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
@@ -189,4 +190,47 @@ def download_master_csv(campaign_id: str, _: AuthDep):
         iter([buf.getvalue()]),
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="master-{campaign_id}.csv"'},
+    )
+
+
+@app.get("/campaigns/{campaign_id}/leads/agency.csv")
+def download_agency_csv(campaign_id: str, _: AuthDep):
+    """Agency-format CSV: 13 columns, Instantly-ready."""
+    db = get_supabase()
+    rows = (
+        db.table("leads")
+        .select("*")
+        .eq("campaign_id", campaign_id)
+        .eq("kept", True)
+        .execute()
+        .data
+    )
+    today = date.today().isoformat()
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=[
+        "Total", "Lead Sourcer", "Business", "Owner Full Name",
+        "First", "Last", "Owner Email", "LinkedIn", "Website",
+        "Phone", "Date", "X Project", "Y Detail",
+    ])
+    writer.writeheader()
+    for i, r in enumerate(rows, start=1):
+        writer.writerow({
+            "Total": i,
+            "Lead Sourcer": r.get("triggered_by") or "DG",
+            "Business": r.get("business_name") or "",
+            "Owner Full Name": r.get("owner_full_name") or "",
+            "First": r.get("owner_first") or "",
+            "Last": r.get("owner_last") or "",
+            "Owner Email": r.get("email") or "",
+            "LinkedIn": r.get("linkedin_url") or "",
+            "Website": r.get("website") or "",
+            "Phone": r.get("phone") or "",
+            "Date": today,
+            "X Project": r.get("x_project") or "",
+            "Y Detail": r.get("y_detail") or "",
+        })
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="agency-{campaign_id}.csv"'},
     )

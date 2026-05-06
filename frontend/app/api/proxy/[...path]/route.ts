@@ -7,16 +7,23 @@ async function forward(req: NextRequest, path: string[]) {
   const url = new URL(req.url);
   const target = `${BASE}/${path.join("/")}${url.search}`;
 
+  const ct = req.headers.get("content-type");
+  const forwardedHeaders: Record<string, string> = { "X-Api-Key": SECRET };
+  // For multipart, forward the original Content-Type (which includes the boundary).
+  // For all other requests, default to application/json if none is set.
+  if (ct) {
+    forwardedHeaders["Content-Type"] = ct;
+  } else if (req.method !== "GET" && req.method !== "HEAD") {
+    forwardedHeaders["Content-Type"] = "application/json";
+  }
+
   const init: RequestInit = {
     method: req.method,
-    headers: {
-      "X-Api-Key": SECRET,
-      "Content-Type": req.headers.get("content-type") ?? "application/json",
-    },
+    headers: forwardedHeaders,
   };
 
   if (req.method !== "GET" && req.method !== "HEAD") {
-    init.body = await req.text();
+    init.body = (ct ?? "").startsWith("multipart/") ? await req.arrayBuffer() : await req.text();
   }
 
   const upstream = await fetch(target, init);

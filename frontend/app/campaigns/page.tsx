@@ -94,7 +94,7 @@ export default async function CampaignsPage() {
             No completed campaigns yet. <Link href="/campaigns/new" className="underline">Start one.</Link>
           </p>
         ) : (
-          <div className="overflow-hidden rounded-lg border">
+          <div className="overflow-x-auto rounded-lg border">
             <Table>
               <TableHeader>
                 <TableRow>

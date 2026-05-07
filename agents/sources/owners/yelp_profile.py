@@ -159,6 +159,12 @@ def _parse_owner_from_html(html: str) -> str | None:
     link.
     """
     soup = BeautifulSoup(html, "html.parser")
+    # Strip non-rendered containers before searching: html.parser will happily
+    # parse <p>...</p> fragments inside <script type="text/template"> and
+    # <noscript> blocks, which Yelp ships. A "Business Owner" label inside one
+    # of those would silently produce a fake owner name in the FindyMail CSV.
+    for tag in soup(["script", "style", "template", "noscript"]):
+        tag.decompose()
     for p in soup.find_all("p"):
         if p.get_text(strip=True) != "Business Owner":
             continue

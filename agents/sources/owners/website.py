@@ -93,7 +93,7 @@ def lookup(lead: Lead, city: str, state_abbr: str, anthropic_key: str) -> dict:
         + "\n\n".join(chunks)
     )
 
-    client = Anthropic(api_key=anthropic_key, timeout=60.0)
+    client = Anthropic(api_key=anthropic_key, timeout=60.0, max_retries=10)
     try:
         response = client.messages.create(
             model="claude-sonnet-4-20250514",

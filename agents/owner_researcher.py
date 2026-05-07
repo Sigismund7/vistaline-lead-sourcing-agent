@@ -28,10 +28,10 @@ from agents.sources.owners import yelp_profile, website, opencorporates, websear
 from agents.sources.owners._utils import split_name
 
 
-MAX_PARALLEL = 8  # CLAUDE.md default. With ScraperAPI in Phase 0, each worker
-# carries its own per-instance rate limiter, so 10 workers could burst to 10
-# concurrent ScraperAPI requests and trip the account-level concurrency cap.
-# I/O-bound; each worker constructs its own Anthropic client.
+MAX_PARALLEL = 4  # Each worker can fire 2-3 Sonnet calls per lead (Phase 1
+# website crawl + Phase 3 web_search). At 8 workers we burst past the org's
+# 30k input-tokens-per-minute cap; 4 keeps us under while still beating
+# sequential. Anthropic SDK max_retries=10 handles residual 429 via retry-after.
 
 # Uniform phase signature
 PhaseFn = Callable[[Lead, str, str, str], dict]

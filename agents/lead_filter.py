@@ -49,7 +49,10 @@ def run(state: CampaignState, anthropic_key: str, batch_size: int = 25) -> None:
     if not targets:
         return
 
-    client = Anthropic(api_key=anthropic_key)
+    # max_retries=10 so the SDK rides out 429s by honoring retry-after.
+    # Org input-tokens-per-minute cap (30k) can be hit when owner_researcher's
+    # parallel phase calls land in the same window as a lead_filter batch.
+    client = Anthropic(api_key=anthropic_key, max_retries=10)
     state.info("lead_filter", f"filtering {len(targets)} new leads in batches of {batch_size}")
 
     for batch_start in range(0, len(targets), batch_size):

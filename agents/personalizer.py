@@ -171,7 +171,7 @@ def extract_xy(
     chosen_project}. External errors are caught and surfaced as an empty
     dict so the caller can mark personalization_status = "vision_failed".
     """
-    client = Anthropic(api_key=anthropic_key)
+    client = Anthropic(api_key=anthropic_key, max_retries=10)
     fewshot = _load_fewshot_block()
     user_text = (
         "Reference style examples (match this shape):\n\n"

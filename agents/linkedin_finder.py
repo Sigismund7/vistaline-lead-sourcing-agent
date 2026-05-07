@@ -57,7 +57,7 @@ def _find_one(owner: str, business: str, city: str, anthropic_key: str) -> str:
     """Return the LinkedIn URL or "" — never raises."""
     if not owner or not business:
         return ""
-    client = Anthropic(api_key=anthropic_key)
+    client = Anthropic(api_key=anthropic_key, max_retries=10)
     user = (
         f"Owner: {owner}\nBusiness: {business}\nCity: {city}\n\n"
         "Find this person's LinkedIn profile."

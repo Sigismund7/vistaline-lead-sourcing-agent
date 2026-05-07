@@ -205,7 +205,7 @@ def _expand_truncated_name(
     query = f"{business_name} {city} {first_name} {last_initial}"
 
     try:
-        client = Anthropic(api_key=anthropic_key, timeout=30.0)
+        client = Anthropic(api_key=anthropic_key, timeout=30.0, max_retries=10)
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=500,

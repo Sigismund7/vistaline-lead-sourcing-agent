@@ -52,7 +52,7 @@ def lookup(lead: Lead, city: str, state_abbr: str, anthropic_key: str) -> dict:
 
     Returns a dict with at minimum: owner_full_name (str), confidence (str).
     """
-    client = Anthropic(api_key=anthropic_key, timeout=60.0)
+    client = Anthropic(api_key=anthropic_key, timeout=60.0, max_retries=10)
     user_msg = (
         f"Business: {lead.business_name}\n"
         f"City: {city}, {state_abbr}\n"

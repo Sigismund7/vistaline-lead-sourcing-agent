@@ -314,7 +314,7 @@ def run(
     # ---- 4.5 Cross-run dedup cache --------------------------------------- #
     try:
         deduped = leads_cache.filter_unseen(
-            deduped, state.city, state.state_abbr, CONFIG.leads_cache_ttl_days
+            deduped, state.city, state.state_abbr, CONFIG.leads_cache_ttl_days, state.niche
         )
     except Exception as exc:
         state.info("sourcer", "leads_cache.filter_unseen error (non-fatal)", error=str(exc))
@@ -327,7 +327,7 @@ def run(
         state.leads.append(_to_lead(normalized))
         new_leads.append(normalized)
 
-    leads_cache.mark_seen(new_leads, state.city, state.state_abbr, state.campaign_id)
+    leads_cache.mark_seen(new_leads, state.city, state.state_abbr, state.campaign_id, state.niche)
 
     state.info(
         "sourcer",

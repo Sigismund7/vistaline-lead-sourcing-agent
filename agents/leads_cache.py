@@ -34,11 +34,18 @@ def _init_db() -> None:
             business_name TEXT NOT NULL,
             city          TEXT NOT NULL,
             state_abbr    TEXT NOT NULL,
+            niche         TEXT NOT NULL DEFAULT '',
             first_seen    TEXT NOT NULL,
             campaign_id   TEXT NOT NULL,
-            PRIMARY KEY (source, source_id)
+            PRIMARY KEY (source, source_id, niche)
         )
     """)
+    # Migration: add niche column to existing tables created before this change.
+    try:
+        conn.execute("ALTER TABLE seen_leads ADD COLUMN niche TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
     conn.commit()
     conn.close()
 
@@ -51,8 +58,9 @@ def filter_unseen(
     city: str,
     state_abbr: str,
     ttl_days: int,
+    niche: str = "",
 ) -> list[dict]:
-    """Return leads not already seen for this city+state within ttl_days.
+    """Return leads not already seen for this city+state+niche within ttl_days.
 
     Leads with empty source_id pass through unconditionally — they can't be
     matched in the cache and skipping them would cause false negatives.
@@ -60,6 +68,7 @@ def filter_unseen(
     """
     city = city.strip().lower()
     state_abbr = state_abbr.strip().upper()
+    niche = niche.strip().lower()
 
     no_id = [l for l in leads if not l.get("source_id")]
     has_id = [l for l in leads if l.get("source_id")]
@@ -75,6 +84,7 @@ def filter_unseen(
                 """
                 SELECT 1 FROM seen_leads
                 WHERE source = ? AND source_id = ? AND city = ? AND state_abbr = ?
+                  AND niche = ?
                   AND julianday('now') - julianday(first_seen) < ?
                 """,
                 (
@@ -82,6 +92,7 @@ def filter_unseen(
                     lead["source_id"],
                     city,
                     state_abbr,
+                    niche,
                     ttl_days,
                 ),
             ).fetchone()
@@ -108,6 +119,7 @@ def mark_seen(
     city: str,
     state_abbr: str,
     campaign_id: str,
+    niche: str = "",
 ) -> None:
     """Upsert leads into the seen-leads cache.
 
@@ -120,6 +132,7 @@ def mark_seen(
 
     city = city.strip().lower()
     state_abbr = state_abbr.strip().upper()
+    niche = niche.strip().lower()
     today = _date.today().isoformat()
 
     rows = [
@@ -129,6 +142,7 @@ def mark_seen(
             lead.get("business_name", ""),
             city,
             state_abbr,
+            niche,
             today,
             campaign_id,
         )
@@ -142,8 +156,8 @@ def mark_seen(
         conn = sqlite3.connect(str(_DB_PATH))
         conn.executemany(
             "INSERT OR REPLACE INTO seen_leads "
-            "(source, source_id, business_name, city, state_abbr, first_seen, campaign_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "(source, source_id, business_name, city, state_abbr, niche, first_seen, campaign_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             rows,
         )
         conn.commit()

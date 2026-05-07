@@ -24,7 +24,7 @@ def _db() -> SupabaseClient:
 class Lead:
     """One lead as it evolves through the pipeline.
 
-    Sourcer fills:          business_name, phone, website, address, area_code, domain, place_id
+    Sourcer fills:          business_name, phone, website, address, area_code, domain, place_id, yelp_id
     Lead filter fills:      kept, reject_reason
     Owner researcher fills: owner_full_name, owner_first, owner_last, owner_source, email
     """
@@ -43,6 +43,7 @@ class Lead:
     owner_source: str = ""
     email: str = ""
     filter_done: bool = False   # set True after lead_filter processes this lead
+    yelp_id: str = ""
     # Personalization (post-FindyMail). Empty string means "not run yet".
     x_project: str = ""
     y_detail: str = ""
@@ -124,6 +125,7 @@ class CampaignState:
                 "owner_source": l.owner_source,
                 "email": l.email,
                 "filter_done": l.filter_done,
+                "yelp_id": l.yelp_id,
                 "x_project": l.x_project,
                 "y_detail": l.y_detail,
                 "y_source": l.y_source,
@@ -165,6 +167,7 @@ class CampaignState:
                 owner_source=r["owner_source"],
                 email=r["email"],
                 filter_done=r.get("filter_done", True),
+                yelp_id=r.get("yelp_id", "") or "",
                 x_project=r.get("x_project", "") or "",
                 y_detail=r.get("y_detail", "") or "",
                 y_source=r.get("y_source", "") or "",

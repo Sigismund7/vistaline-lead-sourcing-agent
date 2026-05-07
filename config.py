@@ -44,6 +44,12 @@ class Config:
     # raise RuntimeError when actually constructing the client.
     opencorporates_api_key: str = ""
 
+    # Owner Researcher Phase 0 — ScraperAPI proxy for Yelp profile pages.
+    # Yelp's Cloudflare protection blocks headless browsers; ScraperAPI's
+    # premium tier (10 credits/req) handles the bypass. Empty when not
+    # provisioned; yelp_profile.py silently disables Phase 0 in that case.
+    scraperapi_key: str = ""
+
     # ---- Rate limiting (Mitigation 10) ----
     azure_maps_rate_limit_qps: float = 1.5
     azure_maps_jitter_ms: int = 200
@@ -55,6 +61,14 @@ class Config:
     # ---- Brave budget guard (defense-in-depth with dashboard cap) ----
     brave_max_monthly_queries: int = 2000
     brave_budget_state_dir: str = "state"  # state/brave_budget_<YYYY-MM>.json
+
+    # ---- ScraperAPI rate + budget guard ----
+    # Hobby plan is 100k credits/mo; Yelp pages cost 10 credits each at
+    # premium tier, so 10k credits ≈ 1000 Yelp pages.
+    scraperapi_rate_limit_qps: float = 5.0
+    scraperapi_jitter_ms: int = 100
+    scraperapi_max_monthly_credits: int = 10000
+    scraperapi_request_timeout_s: int = 70  # premium tier can take 30-60s
 
     # ---- Throttle handling (Mitigation 13) ----
     api_max_retries: int = 5
@@ -94,6 +108,7 @@ CONFIG = Config(
     yelp_fusion_key=_optional("YELP_FUSION_KEY"),
     brave_search_key=_optional("BRAVE_SEARCH_KEY"),
     opencorporates_api_key=_optional("OPENCORPORATES_API_KEY"),
+    scraperapi_key=_optional("SCRAPERAPI_KEY"),
     supabase_url=_optional("SUPABASE_URL"),
     supabase_service_role_key=_optional("SUPABASE_SERVICE_ROLE_KEY"),
     vistaline_api_secret=_optional("VISTALINE_API_SECRET"),

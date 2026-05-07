@@ -28,7 +28,10 @@ from agents.sources.owners import yelp_profile, website, opencorporates, websear
 from agents.sources.owners._utils import split_name
 
 
-MAX_PARALLEL = 10  # I/O-bound; each worker constructs its own Anthropic client.
+MAX_PARALLEL = 8  # CLAUDE.md default. With ScraperAPI in Phase 0, each worker
+# carries its own per-instance rate limiter, so 10 workers could burst to 10
+# concurrent ScraperAPI requests and trip the account-level concurrency cap.
+# I/O-bound; each worker constructs its own Anthropic client.
 
 # Uniform phase signature
 PhaseFn = Callable[[Lead, str, str, str], dict]

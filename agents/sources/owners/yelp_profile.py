@@ -18,7 +18,7 @@ Phase 1 (website crawl).
 """
 from __future__ import annotations
 
-import json
+import html as _html_lib
 import re
 
 from anthropic import Anthropic
@@ -117,59 +117,61 @@ def _fetch_yelp_page(yelp_id: str) -> str | None:
     return client.fetch_html(url, premium=True, render=False)
 
 
-def _parse_owner_from_jsonld(html: str) -> str | None:
-    """Extract owner name from JSON-LD structured data embedded in page.
+# Pattern: the embedded GraphQL state on every Yelp profile page contains
+# a BusinessOwnerProfile entity with a displayName. The state blob is
+# HTML-entity-escaped (&quot; for "), so we unescape before matching. This
+# is the primary extraction path because the state shape is stable across
+# Yelp's frequent CSS class renames.
+_STATE_OWNER_RE = re.compile(
+    r'"__typename"\s*:\s*"BusinessOwnerProfile"\s*,\s*"displayName"\s*:\s*"([^"]+)"'
+)
 
-    Yelp embeds schema.org Person entities for business owners in some
-    markets. Returns None when no Person with an owner-role jobTitle is found.
+
+def _parse_owner_from_state(html: str) -> str | None:
+    """Extract owner name from Yelp's embedded GraphQL state blob.
+
+    Yelp ships its React client state inside the page as a JSON-encoded,
+    HTML-entity-escaped script. The state contains BusinessOwnerProfile
+    objects with a `displayName` field — that's the same string rendered
+    visually as the owner name. Robust against CSS/className changes.
     """
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup.find_all("script", type="application/ld+json"):
-        try:
-            data = json.loads(tag.string or "")
-        except (json.JSONDecodeError, TypeError):
-            continue
-        items = data if isinstance(data, list) else [data]
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            if (item.get("@type") == "Person"
-                    and "owner" in (item.get("jobTitle") or "").lower()
-                    and item.get("name")):
-                return item["name"].strip()
-    return None
+    decoded = _html_lib.unescape(html)
+    m = _STATE_OWNER_RE.search(decoded)
+    if not m:
+        return None
+    name = m.group(1).strip()
+    return name or None
 
 
 def _parse_owner_from_html(html: str) -> str | None:
-    """Extract owner name from the 'Business Owner' label in the page HTML.
+    """DOM fallback: find a bold name immediately above a 'Business Owner' label.
 
-    Yelp renders 'Business Owner' as a visible text label adjacent to the
-    owner's name in the 'About the Business' section. We walk every element
-    containing that label text and extract the adjacent non-label text.
+    Used only when _parse_owner_from_state misses (rare — happens on listings
+    where the owner has uploaded a custom bio without claiming via the
+    standard flow). Looks for a `<p>` whose direct text is exactly
+    'Business Owner', then walks up to the nearest container holding a
+    sibling `<p data-font-weight="bold">` — that bold paragraph carries
+    the owner's name.
+
+    Tighter than the previous heuristic: requires an exact-text 'Business
+    Owner' label *and* a bold-weight name paragraph in the same container.
+    Avoids the false-positive match on the 'Business Owner Login' footer
+    link.
     """
     soup = BeautifulSoup(html, "html.parser")
-    for tag in soup.find_all(True):
-        if "Business Owner" not in tag.get_text():
+    for p in soup.find_all("p"):
+        if p.get_text(strip=True) != "Business Owner":
             continue
-
-        block_text = tag.get_text(separator="\n", strip=True)
-        lines = block_text.split("\n")
-        # Only inspect lines that follow the "Business Owner" sentinel so we
-        # don't accidentally return section headings that appear before it.
-        found_label = False
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            if line == "Business Owner":
-                found_label = True
-                continue
-            if not found_label:
-                continue
-            words = line.split()
-            if len(words) >= 2 and not any(ch.isdigit() for ch in line):
-                return line
-
+        ancestor = p.parent
+        for _ in range(4):
+            if ancestor is None:
+                break
+            name_p = ancestor.find("p", attrs={"data-font-weight": "bold"})
+            if name_p is not None:
+                name = name_p.get_text(strip=True)
+                if name and name != "Business Owner":
+                    return name
+            ancestor = ancestor.parent
     return None
 
 
@@ -256,7 +258,7 @@ def lookup(lead: Lead, city: str, state_abbr: str, anthropic_key: str) -> dict:
 
     profile_url = f"https://www.yelp.com/biz/{yelp_id}"
 
-    name = _parse_owner_from_jsonld(html)
+    name = _parse_owner_from_state(html)
     if not name:
         name = _parse_owner_from_html(html)
 

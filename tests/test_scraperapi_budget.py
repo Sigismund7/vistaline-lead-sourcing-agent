@@ -139,7 +139,7 @@ class ScraperAPIHTTPPathTests(unittest.TestCase):
 
         # Key must be in headers...
         self.assertEqual(
-            kwargs["headers"], {"x-sap-api-key": "secret-key-do-not-leak"}
+            kwargs["headers"], {"x-sapi-api_key": "secret-key-do-not-leak"}
         )
         # ...and absent from params (so it never lands in resp.url or in any
         # HTTPError message that requests builds from the prepared URL).

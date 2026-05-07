@@ -867,6 +867,7 @@ class ScraperAPIClient:
         os.replace(tmp, path)
 
     def _respect_rate_limit(self) -> None:
+        """Token-bucket pacing + jitter (Mitigation 10)."""
         if self._min_interval_s <= 0:
             return
         now = time.monotonic()
@@ -907,27 +908,37 @@ class ScraperAPIClient:
         """
         # Header auth (not query param) keeps the key out of resp.url and
         # any HTTPError stack-trace message. Mirrors BraveSearchClient.
-        headers = {"x-sap-api-key": self._api_key}
+        # Header name per ScraperAPI docs: x-sapi-api_key
+        # (https://docs.scraperapi.com/control-and-optimization/passing-api-parameters-as-headers)
+        headers = {"x-sapi-api_key": self._api_key}
         for attempt in range(self._max_retries + 1):
             self._respect_rate_limit()
+            network_error = False
+            resp: requests.Response | None = None
             try:
-                try:
-                    resp = self._session.get(
-                        self.BASE_URL,
-                        params=params,
-                        headers=headers,
-                        timeout=self._timeout,
-                    )
-                except (requests.Timeout, requests.ConnectionError):
-                    # Network-level failure — retry with backoff if attempts
-                    # remain, else give up (caller falls through to Phase 1).
-                    if attempt >= self._max_retries:
-                        return None
-                    self._sleep_backoff(attempt)
-                    continue
+                resp = self._session.get(
+                    self.BASE_URL,
+                    params=params,
+                    headers=headers,
+                    timeout=self._timeout,
+                )
+            except (requests.Timeout, requests.ConnectionError):
+                # Network-level failure — retry with backoff if attempts
+                # remain, else give up (caller falls through to Phase 1).
+                network_error = True
             finally:
                 self._last_call_ts = time.monotonic()
 
+            # Backoff sleep happens AFTER _last_call_ts is updated, so the
+            # next iteration's _respect_rate_limit reads a fresh timestamp
+            # and doesn't double-sleep on top of the backoff.
+            if network_error:
+                if attempt >= self._max_retries:
+                    return None
+                self._sleep_backoff(attempt)
+                continue
+
+            assert resp is not None
             status = resp.status_code
             if status < 400:
                 return resp.text

@@ -64,7 +64,7 @@ def _area_code(phone: str) -> str:
     return digits[:3] if len(digits) >= 10 else ""
 
 
-def _source_via_azure(state: CampaignState) -> list[dict]:
+def _source_via_azure(state: CampaignState, count: int) -> list[dict]:
     """Worker A: construct an AzureMapsClient and source leads.
 
     Constructs a fresh client per worker invocation — the client's rate
@@ -85,12 +85,12 @@ def _source_via_azure(state: CampaignState) -> list[dict]:
         state=state.state_abbr,
         city=state.city,
         niche=state.niche,
-        count=state.target_count,
+        count=count,
         radius_m=CONFIG.azure_maps_default_radius_m,
     )
 
 
-def _source_via_yelp(state: CampaignState) -> list[dict]:
+def _source_via_yelp(state: CampaignState, count: int) -> list[dict]:
     """Worker B: construct a YelpFusionClient and source leads.
 
     Constructs a fresh client per worker invocation — same thread-safety
@@ -110,7 +110,7 @@ def _source_via_yelp(state: CampaignState) -> list[dict]:
         state=state.state_abbr,
         city=state.city,
         niche=state.niche,
-        count=state.target_count,
+        count=count,
         radius_m=CONFIG.yelp_default_radius_m,
     )
 
@@ -277,8 +277,8 @@ def run(
     azure_results: list[dict] = []
     yelp_results: list[dict] = []
     with ThreadPoolExecutor(max_workers=_FANOUT_WORKERS) as pool:
-        future_azure = pool.submit(_source_via_azure, state)
-        future_yelp = pool.submit(_source_via_yelp, state)
+        future_azure = pool.submit(_source_via_azure, state, effective_batch)
+        future_yelp = pool.submit(_source_via_yelp, state, effective_batch)
         try:
             azure_results = future_azure.result()
         except Exception as e:

@@ -803,8 +803,11 @@ class ScraperAPIClient:
         except ScraperAPIBudgetExceededError:
             return None
 
+        # api_key intentionally NOT in params — `requests` puts the full URL
+        # (including query string) into resp.url and HTTPError messages, which
+        # would leak the key into stack traces. We pass it via header instead,
+        # mirroring BraveSearchClient's `X-Subscription-Token` pattern.
         params: dict[str, Any] = {
-            "api_key": self._api_key,
             "url": url,
             "country_code": country_code,
         }
@@ -815,10 +818,16 @@ class ScraperAPIClient:
 
         try:
             return self._get_with_retries(params)
-        except Exception:
-            # Per CLAUDE.md: external-API failures are caught and the caller
-            # falls through silently. Internal bugs would raise via the
-            # _reserve_budget_slot path above (programming errors only).
+        except requests.HTTPError as exc:
+            # 401 means SCRAPERAPI_KEY is misconfigured — that's our bug, not
+            # an external-API failure, so let it crash per CLAUDE.md ("errors
+            # from our own bugs are allowed to crash"). Otherwise fall through.
+            if exc.response is not None and exc.response.status_code == 401:
+                raise
+            return None
+        except (requests.RequestException, RuntimeError):
+            # External-API failure (network, malformed response, budget guard
+            # raised mid-flight). Caller treats None as "no Phase 0 result".
             return None
 
     # ------------------------------------------------------------------ #
@@ -871,6 +880,18 @@ class ScraperAPIClient:
             )
             time.sleep(wait + jitter_s)
 
+    def _sleep_backoff(self, attempt: int) -> None:
+        """Exponential back-off + jitter sleep for retry attempt `attempt`."""
+        backoff = min(
+            self._backoff_max_s, self._backoff_base_s * (2 ** attempt)
+        )
+        jitter_s = (
+            random.random() * (self._jitter_ms / 1000.0)
+            if self._jitter_ms > 0
+            else 0.0
+        )
+        time.sleep(backoff + jitter_s)
+
     def _get_with_retries(self, params: dict[str, Any]) -> str | None:
         """GET ScraperAPI with exp back-off on 429/500/502/503/504.
 
@@ -880,17 +901,32 @@ class ScraperAPIClient:
           - 503 when their proxy pool is saturated (transient — retry)
           - 401 when the api_key is bad (do not retry, raise)
           - 403 when the URL is blocked / banned (do not retry, return None)
+
+        Network-level failures (Timeout, ConnectionError) are also retryable;
+        propagating them up would skip the retry loop entirely.
         """
-        last_resp: requests.Response | None = None
+        # Header auth (not query param) keeps the key out of resp.url and
+        # any HTTPError stack-trace message. Mirrors BraveSearchClient.
+        headers = {"x-sap-api-key": self._api_key}
         for attempt in range(self._max_retries + 1):
             self._respect_rate_limit()
             try:
-                resp = self._session.get(
-                    self.BASE_URL, params=params, timeout=self._timeout
-                )
+                try:
+                    resp = self._session.get(
+                        self.BASE_URL,
+                        params=params,
+                        headers=headers,
+                        timeout=self._timeout,
+                    )
+                except (requests.Timeout, requests.ConnectionError):
+                    # Network-level failure — retry with backoff if attempts
+                    # remain, else give up (caller falls through to Phase 1).
+                    if attempt >= self._max_retries:
+                        return None
+                    self._sleep_backoff(attempt)
+                    continue
             finally:
                 self._last_call_ts = time.monotonic()
-            last_resp = resp
 
             status = resp.status_code
             if status < 400:
@@ -904,15 +940,7 @@ class ScraperAPIClient:
             if not retryable or attempt >= self._max_retries:
                 return None
 
-            backoff = min(
-                self._backoff_max_s, self._backoff_base_s * (2 ** attempt)
-            )
-            jitter_s = (
-                random.random() * (self._jitter_ms / 1000.0)
-                if self._jitter_ms > 0
-                else 0.0
-            )
-            time.sleep(backoff + jitter_s)
+            self._sleep_backoff(attempt)
 
         return None
 

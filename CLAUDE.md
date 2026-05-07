@@ -33,7 +33,7 @@ python run.py --resume <campaign-id>     # after a crash
 ## Cost discipline
 
 - **Never add a paid API call without a prompt to me first.** This includes Anthropic API calls in new places, FindyMail-style enrichment services, paid scrapers.
-- The current paid surfaces are: Anthropic API (Claude calls in `lead_filter`, `owner_researcher`), Google Places API (in `sourcer`). Adding a third needs my approval.
+- The current paid surfaces are: Anthropic API (Claude calls in `lead_filter`, `owner_researcher`), Google Places API (in `sourcer`), ScraperAPI (Yelp profile fetches in `agents/sources/owners/yelp_profile.py`, ~$0.005/page premium tier, hard 10k credits/month cap in `state/scraperapi_budget_<YYYY-MM>.json`). Adding a fourth needs my approval.
 - When adding parallelism, default to `MAX_PARALLEL = 8` unless there's a specific reason to go higher. Higher concurrency = higher rate-limit risk.
 
 ## What's already built

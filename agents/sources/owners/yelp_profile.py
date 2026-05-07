@@ -1,16 +1,20 @@
 """Phase 0 — Yelp profile page owner lookup.
 
 Checks the 'Business Owner' labeled field in Yelp's 'About the Business'
-section. Free: no LLM calls except when a truncated last-name initial is
-found (e.g. 'John S.'), which triggers one web-search call to resolve the
-full last name before returning.
+section. Profile pages are fetched through ScraperAPI's premium proxy
+(10 credits/page) because Yelp's Cloudflare protection blocks direct
+HTTP and headless-browser fetches. The Yelp Fusion API is still used to
+resolve the business alias for leads not sourced from Yelp directly.
 
-The Yelp Fusion API is used only to resolve the Yelp business alias for
-leads that weren't sourced from Yelp.
+When a name with a truncated last-name initial is found (e.g. 'John S.'),
+one web-search call to Claude is made to resolve the full last name
+before returning. Names that can't be expanded confidently are returned
+with confidence='partial' and needs_review=True for downstream flagging.
 
-Failure modes: all silent fallthrough. A 403 block, no search results, or
-a missing 'Business Owner' field all return confidence='none' so the
-pipeline continues to Phase 1 (website crawl).
+Failure modes: all silent fallthrough. Missing SCRAPERAPI_KEY, ScraperAPI
+budget exhaustion, a 403 block, no search results, or a missing 'Business
+Owner' field all return confidence='none' so the pipeline continues to
+Phase 1 (website crawl).
 """
 from __future__ import annotations
 
@@ -19,18 +23,16 @@ import re
 
 from anthropic import Anthropic
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout, Error as PlaywrightError
 from rapidfuzz import fuzz
 
 from config import CONFIG
 from state import Lead
-from tools import YelpFusionClient
+from tools import ScraperAPIClient, YelpFusionClient
 from agents.sources.owners._utils import parse_owner_json
 
 
 _SEARCH_CATEGORIES = "contractors,kitchen_and_bath,homeservices"
 _FUZZY_THRESHOLD = 85
-_PAGE_FETCH_TIMEOUT_MS = 15_000
 
 # Matches "John S." or "Maria R." — first word + single capital + period.
 _TRUNCATED_NAME_RE = re.compile(r"^[A-Za-z]+ [A-Z]\.$")
@@ -90,36 +92,29 @@ def _resolve_yelp_id(lead: Lead, city: str, state_abbr: str, yelp_key: str) -> s
 
 
 def _fetch_yelp_page(yelp_id: str) -> str | None:
-    """Fetch the fully-rendered Yelp business profile page HTML via Playwright.
+    """Fetch the Yelp business profile page HTML via ScraperAPI premium proxy.
 
-    Uses headless Chromium so Yelp's Cloudflare bot-detection sees a real
-    browser rather than a plain HTTP client. Returns None on timeout, nav
-    error, or any Playwright exception so callers fall through silently.
+    Returns None when SCRAPERAPI_KEY is unset, the budget is exhausted, the
+    upstream is blocked, or the request fails — callers fall through to the
+    next owner-research phase silently. Constructs a fresh ScraperAPIClient
+    per call (each owner_researcher worker is its own thread, so this avoids
+    cross-thread state on requests.Session and the rate limiter).
     """
+    if not CONFIG.scraperapi_key:
+        return None
+
+    client = ScraperAPIClient(
+        api_key=CONFIG.scraperapi_key,
+        rate_limit_qps=CONFIG.scraperapi_rate_limit_qps,
+        jitter_ms=CONFIG.scraperapi_jitter_ms,
+        max_retries=CONFIG.api_max_retries,
+        backoff_base_s=CONFIG.api_backoff_base_s,
+        backoff_max_s=CONFIG.api_backoff_max_s,
+        request_timeout_s=CONFIG.scraperapi_request_timeout_s,
+        max_monthly_credits=CONFIG.scraperapi_max_monthly_credits,
+    )
     url = f"https://www.yelp.com/biz/{yelp_id}"
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            try:
-                context = browser.new_context(
-                    locale="en-US",
-                    viewport={"width": 1280, "height": 800},
-                )
-                page = context.new_page()
-                page.set_default_timeout(_PAGE_FETCH_TIMEOUT_MS)
-                resp = page.goto(url, wait_until="domcontentloaded")
-                if resp is None or not resp.ok:
-                    return None
-                # Wait briefly for any deferred React hydration that may inject
-                # the Business Owner section after the initial DOM paint.
-                page.wait_for_timeout(800)
-                return page.content()
-            finally:
-                browser.close()
-    except (PlaywrightTimeout, PlaywrightError):
-        return None
-    except Exception:
-        return None
+    return client.fetch_html(url, premium=True, render=False)
 
 
 def _parse_owner_from_jsonld(html: str) -> str | None:

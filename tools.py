@@ -698,6 +698,226 @@ class BraveSearchClient:
 
 
 # --------------------------------------------------------------------------- #
+# ScraperAPI client                                                           #
+# --------------------------------------------------------------------------- #
+
+
+class ScraperAPIBudgetExceededError(RuntimeError):
+    """Raised when the ScraperAPI monthly credit budget would be exceeded."""
+
+
+class ScraperAPIClient:
+    """ScraperAPI proxy client for Cloudflare-protected pages (e.g. Yelp).
+
+    ScraperAPI accepts a target URL and returns the rendered HTML, handling
+    Cloudflare/captcha bypass server-side. We use the GET endpoint with
+    `premium=true` for Yelp (10 credits per request); JS rendering is off
+    by default since Yelp's "Business Owner" field ships in the static HTML.
+
+    Mirrors the BraveSearchClient pattern: token-bucket rate limiter, jitter,
+    exponential back-off on 429/5xx, and a per-month credit budget guard.
+    Counter file is `state/scraperapi_budget_<YYYY-MM>.json`; rolls over
+    automatically each month.
+
+    Not thread-safe; construct one per worker (CLAUDE.md rule). The budget
+    file has the same at-most-once-fail-loose semantics as the Brave one —
+    a crash mid-write may grant one extra call past cap, which is acceptable.
+
+    Reference: https://www.scraperapi.com/documentation/
+    """
+
+    BASE_URL = "https://api.scraperapi.com/"
+    # Per ScraperAPI docs, premium-tier requests for protected sites cost
+    # 10 credits each; ultra_premium (with JS render) is 25-30. We default
+    # to premium because Yelp's owner field is server-rendered.
+    PREMIUM_CREDIT_COST = 10
+    ULTRA_PREMIUM_CREDIT_COST = 25
+
+    def __init__(
+        self,
+        api_key: str,
+        rate_limit_qps: float = 5.0,
+        jitter_ms: int = 100,
+        max_retries: int = 3,
+        backoff_base_s: float = 2.0,
+        backoff_max_s: float = 30.0,
+        request_timeout_s: int = 70,
+        max_monthly_credits: int = 10000,
+        budget_state_path: pathlib.Path | None = None,
+        session: requests.Session | None = None,
+    ) -> None:
+        if not api_key:
+            raise RuntimeError(
+                "ScraperAPIClient requires an api_key. Set SCRAPERAPI_KEY in .env."
+            )
+        self._api_key = api_key
+        self._rate_limit_qps = float(rate_limit_qps) if rate_limit_qps else 0.0
+        self._min_interval_s = (
+            1.0 / self._rate_limit_qps if self._rate_limit_qps > 0 else 0.0
+        )
+        self._jitter_ms = max(0, int(jitter_ms))
+        self._max_retries = max(0, int(max_retries))
+        self._backoff_base_s = float(backoff_base_s)
+        self._backoff_max_s = float(backoff_max_s)
+        self._timeout = int(request_timeout_s)
+        self._session = session if session is not None else requests.Session()
+
+        self._max_monthly_credits = int(max_monthly_credits)
+        if budget_state_path is None:
+            month = datetime.now(timezone.utc).strftime("%Y-%m")
+            budget_state_path = pathlib.Path("state") / f"scraperapi_budget_{month}.json"
+        self._budget_state_path = pathlib.Path(budget_state_path)
+
+        self._last_call_ts: float = float("-inf")
+
+    # ------------------------------------------------------------------ #
+    # Public API                                                          #
+    # ------------------------------------------------------------------ #
+
+    def fetch_html(
+        self,
+        url: str,
+        *,
+        premium: bool = True,
+        render: bool = False,
+        country_code: str = "us",
+    ) -> str | None:
+        """Fetch a target URL through ScraperAPI; return HTML or None.
+
+        Returns None (rather than raising) on any non-success path:
+        budget exhausted, network error, or upstream non-2xx after retries.
+        Callers (yelp_profile._fetch_yelp_page) treat None as "no Phase 0
+        result, fall through to next phase".
+
+        `premium=True` uses ScraperAPI's residential premium pool for
+        Cloudflare-protected sites (10 credits). `render=True` adds JS
+        rendering (additional credit cost). Yelp's owner field is server-
+        rendered, so we keep render=False by default.
+        """
+        cost = (
+            self.ULTRA_PREMIUM_CREDIT_COST if render else self.PREMIUM_CREDIT_COST
+        ) if premium else 1
+
+        try:
+            self._reserve_budget_slot(cost)
+        except ScraperAPIBudgetExceededError:
+            return None
+
+        params: dict[str, Any] = {
+            "api_key": self._api_key,
+            "url": url,
+            "country_code": country_code,
+        }
+        if premium:
+            params["premium"] = "true"
+        if render:
+            params["render"] = "true"
+
+        try:
+            return self._get_with_retries(params)
+        except Exception:
+            # Per CLAUDE.md: external-API failures are caught and the caller
+            # falls through silently. Internal bugs would raise via the
+            # _reserve_budget_slot path above (programming errors only).
+            return None
+
+    # ------------------------------------------------------------------ #
+    # Internals                                                           #
+    # ------------------------------------------------------------------ #
+
+    def _reserve_budget_slot(self, cost: int) -> None:
+        """Read counter, raise if next call would exceed cap, else increment.
+
+        Same atomic-replace pattern as BraveSearchClient — write tmp file
+        in same directory, os.replace() onto target. Crash-safe: a half-
+        written counter is impossible.
+        """
+        path = self._budget_state_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        current_month = datetime.now(timezone.utc).strftime("%Y-%m")
+        used = 0
+        if path.exists():
+            try:
+                data = json.loads(path.read_text())
+                if data.get("month") == current_month:
+                    used = int(data.get("credits_used", 0))
+            except (json.JSONDecodeError, ValueError, OSError):
+                used = 0
+
+        if used + cost > self._max_monthly_credits:
+            raise ScraperAPIBudgetExceededError(
+                f"ScraperAPI monthly credit budget exceeded for {current_month}: "
+                f"{used} of {self._max_monthly_credits} used; "
+                f"next call would push to {used + cost}."
+            )
+
+        new_used = used + cost
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps({"month": current_month, "credits_used": new_used}))
+        os.replace(tmp, path)
+
+    def _respect_rate_limit(self) -> None:
+        if self._min_interval_s <= 0:
+            return
+        now = time.monotonic()
+        elapsed = now - self._last_call_ts
+        wait = self._min_interval_s - elapsed
+        if wait > 0:
+            jitter_s = (
+                random.random() * (self._jitter_ms / 1000.0)
+                if self._jitter_ms > 0
+                else 0.0
+            )
+            time.sleep(wait + jitter_s)
+
+    def _get_with_retries(self, params: dict[str, Any]) -> str | None:
+        """GET ScraperAPI with exp back-off on 429/500/502/503/504.
+
+        ScraperAPI returns:
+          - 200 with HTML body on success
+          - 500 when the upstream site is unreachable
+          - 503 when their proxy pool is saturated (transient — retry)
+          - 401 when the api_key is bad (do not retry, raise)
+          - 403 when the URL is blocked / banned (do not retry, return None)
+        """
+        last_resp: requests.Response | None = None
+        for attempt in range(self._max_retries + 1):
+            self._respect_rate_limit()
+            try:
+                resp = self._session.get(
+                    self.BASE_URL, params=params, timeout=self._timeout
+                )
+            finally:
+                self._last_call_ts = time.monotonic()
+            last_resp = resp
+
+            status = resp.status_code
+            if status < 400:
+                return resp.text
+
+            if status == 401:
+                # Auth error — caller bug, surface it.
+                resp.raise_for_status()
+
+            retryable = status == 429 or 500 <= status < 600
+            if not retryable or attempt >= self._max_retries:
+                return None
+
+            backoff = min(
+                self._backoff_max_s, self._backoff_base_s * (2 ** attempt)
+            )
+            jitter_s = (
+                random.random() * (self._jitter_ms / 1000.0)
+                if self._jitter_ms > 0
+                else 0.0
+            )
+            time.sleep(backoff + jitter_s)
+
+        return None
+
+
+# --------------------------------------------------------------------------- #
 # OpenCorporates client                                                       #
 # --------------------------------------------------------------------------- #
 

@@ -1,8 +1,8 @@
-"""Phase 4 — BBB + Google web search fallback owner lookup.
+"""Open web search fallback owner lookup (Houzz, Google, review responses).
 
-Uses Claude's web_search tool to search BBB.org, then Google "owner",
-then Google "founder". Paid: ~$0.04/lead reaching this phase.
-Toggleable via campaign.use_websearch.
+Uses Claude's web_search tool across non-BBB sources. BBB is no longer
+searched here — it's owned by Phase 0 (bbb_direct + bbb_websearch). Paid:
+~$0.04/lead reaching this phase. Toggleable via campaign.use_websearch.
 """
 from __future__ import annotations
 
@@ -13,21 +13,18 @@ from agents.sources.owners._utils import parse_owner_json
 
 SYSTEM_PROMPT = """You are a research assistant finding the owner of a small remodeling-contractor business.
 
-Use the web_search tool. Try each strategy in order — stop as soon as you find a real full name with clear ownership evidence.
+Use the web_search tool. Try each strategy in order — stop as soon as you find a real full name with clear ownership evidence. Do NOT search BBB.org — that source is already covered by an earlier phase, you would be duplicating work.
 
-1. BBB:  "{business_name}" {city} BBB
-   Look for "Principal" / "Owner" / "President" on a BBB.org listing.
-
-2. Houzz:  "{business_name}" {city} site:houzz.com
+1. Houzz:  "{business_name}" {city} site:houzz.com
    If a Houzz pro profile appears, look for owner/founder language in the About section.
 
-3. Google owner:  {business_name} owner {city} {state}
+2. Google owner:  {business_name} owner {city} {state}
 
-4. Review responses:  "{business_name}" {city} owner review
+3. Review responses:  "{business_name}" {city} owner review
    Owner-signed review responses often say "Thanks — John Smith, Owner" or
    "John and his team appreciate your business." Check Google Maps and Yelp pages.
 
-5. Google founder:  {business_name} {city} {state} owner OR founder
+4. Google founder:  {business_name} {city} {state} owner OR founder
 
 CONFIDENCE RULES:
 - "high":   full first+last name with explicit title (Owner / Founder / President / Principal)
@@ -71,7 +68,7 @@ def lookup(lead: Lead, city: str, state_abbr: str, anthropic_key: str) -> dict:
             messages=[{"role": "user", "content": user_msg}],
         )
     except Exception as e:
-        return {"owner_full_name": "", "confidence": "none", "error": str(e)}
+        return {"owner_full_name": "", "confidence": "none", "phase": "web_search", "error": str(e)}
 
     text = "".join(
         b.text for b in response.content if getattr(b, "type", "") == "text"

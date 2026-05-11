@@ -192,7 +192,7 @@ def lookup(lead: Lead, city: str, state_abbr: str, anthropic_key: str) -> dict:
         return {"owner_full_name": "", "confidence": "none", "phase": "yelp_profile"}
 
     if TRUNCATED_NAME_RE.match(name):
-        expanded = expand_truncated_name(name, lead.business_name, city, anthropic_key)
+        expanded = expand_truncated_name(name, lead.business_name, city, anthropic_key, phase="yelp_profile")
         if expanded:
             expanded.setdefault("source_url", profile_url)
             expanded.setdefault("evidence", "Yelp Business Owner labeled field (name expanded via web search)")

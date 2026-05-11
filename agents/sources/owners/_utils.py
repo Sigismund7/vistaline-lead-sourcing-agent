@@ -82,7 +82,7 @@ def expand_truncated_name(
     business_name: str,
     city: str,
     anthropic_key: str,
-    phase: str = "yelp_profile",
+    phase: str,
 ) -> dict | None:
     """Try to resolve a truncated last-name initial to a full last name.
 

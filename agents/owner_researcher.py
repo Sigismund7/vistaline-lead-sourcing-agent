@@ -37,6 +37,12 @@ MAX_PARALLEL = 4  # Each worker can fire 2-3 Sonnet calls per lead (Phase 1
 # 30k input-tokens-per-minute cap; 4 keeps us under while still beating
 # sequential. Anthropic SDK max_retries=10 handles residual 429 via retry-after.
 
+# Confidence levels that count as a valid stop / commit-to-CSV. 'partial' is
+# included so truncated-name fallbacks (e.g. BBB returned "John O." and the
+# web_search expansion couldn't confirm the full last name) still ship the
+# partial result with needs_review=True instead of being silently dropped.
+_STOP_CONFIDENCES = ("high", "medium", "partial")
+
 # Uniform phase signature
 PhaseFn = Callable[[Lead, str, str, str], dict]
 
@@ -157,8 +163,6 @@ def _research_one(
     bbb_phases_in_list = [p for p in phases if p in (bbb_direct.lookup, bbb_websearch.lookup)]
     other_phases = [p for p in phases if p not in (bbb_direct.lookup, bbb_websearch.lookup)]
 
-    _STOP_CONFIDENCES = ("high", "medium", "partial")
-
     if CONFIG.bbb_compare_mode and len(bbb_phases_in_list) == 2:
         # Run BOTH BBB phases unconditionally — measurement comes first.
         bbb_results: dict[str, dict] = {}
@@ -203,7 +207,7 @@ def _research_one(
             result = phase_fn(lead, city, state_abbr, anthropic_key)
         except Exception:
             continue
-        if result.get("owner_full_name") and result.get("confidence") in ("high", "medium"):
+        if result.get("owner_full_name") and result.get("confidence") in _STOP_CONFIDENCES:
             return result
 
     return {"owner_full_name": "", "confidence": "none", "phase": "not_found"}
@@ -244,7 +248,7 @@ def run(state: CampaignState, anthropic_key: str) -> None:
                 result = {"owner_full_name": "", "confidence": "none"}
 
             full = (result.get("owner_full_name") or "").strip()
-            if full and result.get("confidence") in ("high", "medium"):
+            if full and result.get("confidence") in _STOP_CONFIDENCES:
                 lead.owner_full_name = full
                 lead.owner_first, lead.owner_last = split_name(full)
                 lead.owner_source = result.get("phase", "")

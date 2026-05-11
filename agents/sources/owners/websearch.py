@@ -71,7 +71,7 @@ def lookup(lead: Lead, city: str, state_abbr: str, anthropic_key: str) -> dict:
             messages=[{"role": "user", "content": user_msg}],
         )
     except Exception as e:
-        return {"owner_full_name": "", "confidence": "none", "error": str(e)}
+        return {"owner_full_name": "", "confidence": "none", "phase": "web_search", "error": str(e)}
 
     text = "".join(
         b.text for b in response.content if getattr(b, "type", "") == "text"

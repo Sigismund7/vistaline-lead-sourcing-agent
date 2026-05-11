@@ -33,6 +33,16 @@ COLUMNS = [
     "place_id",
 ]
 
+# Master CSV also captures BBB compare-mode A/B artifacts so the analysis
+# script can compute per-phase hit rates without re-running campaigns.
+# FindyMail CSV stays lean — operators don't need to see the compare cols.
+MASTER_EXTRA_COLUMNS = [
+    "bbb_direct_name", "bbb_direct_url",
+    "bbb_websearch_name", "bbb_websearch_url",
+    "bbb_conflict",
+]
+MASTER_COLUMNS = COLUMNS + MASTER_EXTRA_COLUMNS
+
 
 def run(state: CampaignState) -> tuple[str, str]:
     """Writes both CSVs. Returns (findymail_path, master_path)."""
@@ -40,8 +50,8 @@ def run(state: CampaignState) -> tuple[str, str]:
     safe_niche = state.niche.replace(" ", "_")
     base = f"{safe_city}_{state.state_abbr}_{safe_niche}_{date.today().isoformat()}"
 
-    def _row(lead) -> dict:
-        return {
+    def _row(lead, *, with_bbb_compare: bool = False) -> dict:
+        row = {
             "kept": lead.kept,
             "reject_reason": lead.reject_reason,
             "business_name": lead.business_name,
@@ -63,6 +73,13 @@ def run(state: CampaignState) -> tuple[str, str]:
             "personalization_status": lead.personalization_status,
             "place_id": lead.place_id,
         }
+        if with_bbb_compare:
+            row["bbb_direct_name"] = lead.bbb_direct_name
+            row["bbb_direct_url"] = lead.bbb_direct_url
+            row["bbb_websearch_name"] = lead.bbb_websearch_name
+            row["bbb_websearch_url"] = lead.bbb_websearch_url
+            row["bbb_conflict"] = lead.bbb_conflict
+        return row
 
     # FindyMail-ready CSV — kept leads with a confirmed owner first + last name
     findymail_ready = [
@@ -76,13 +93,13 @@ def run(state: CampaignState) -> tuple[str, str]:
         for lead in findymail_ready:
             w.writerow(_row(lead))
 
-    # Master CSV — every lead captured
+    # Master CSV — every lead captured, plus BBB compare-mode A/B artifacts.
     master_path = OUT_DIR / f"{base}__master.csv"
     with master_path.open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=COLUMNS)
+        w = csv.DictWriter(f, fieldnames=MASTER_COLUMNS)
         w.writeheader()
         for lead in state.leads:
-            w.writerow(_row(lead))
+            w.writerow(_row(lead, with_bbb_compare=True))
 
     state.info("csv_assembler", f"wrote FindyMail CSV ({len(findymail_ready)} rows): {findymail_path}")
     state.info("csv_assembler", f"wrote master CSV ({len(state.leads)} rows): {master_path}")

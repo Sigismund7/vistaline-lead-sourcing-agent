@@ -33,14 +33,14 @@ python run.py --resume <campaign-id>     # after a crash
 ## Cost discipline
 
 - **Never add a paid API call without a prompt to me first.** This includes Anthropic API calls in new places, FindyMail-style enrichment services, paid scrapers.
-- The current paid surfaces are: Anthropic API (Claude calls in `lead_filter`, `owner_researcher`), Google Places API (in `sourcer`), ScraperAPI (Yelp profile fetches in `agents/sources/owners/yelp_profile.py`, ~$0.005/page premium tier, hard 10k credits/month cap in `state/scraperapi_budget_<YYYY-MM>.json`). Adding a fourth needs my approval.
+- The current paid surfaces are: Anthropic API (Claude calls in `lead_filter`, `owner_researcher`), Google Places API (in `sourcer`), ScraperAPI (BBB profile fetches in `agents/sources/owners/bbb_direct.py` and optional Yelp profile fetches in `agents/sources/owners/yelp_profile.py`, both at ~$0.005/page premium tier, hard 10k credits/month cap in `state/scraperapi_budget_<YYYY-MM>.json`). Adding a fourth needs my approval.
 - When adding parallelism, default to `MAX_PARALLEL = 8` unless there's a specific reason to go higher. Higher concurrency = higher rate-limit risk.
 
 ## What's already built
 
 - `agents/sourcer.py` — Google Places API Text Search, multiple keyword variants per niche
 - `agents/lead_filter.py` — Claude with the SOP filter rules, batches of 25
-- `agents/owner_researcher.py` — two-phase: website crawl (free) then BBB+Google fallback (web_search). Phase 1 captures both name and owner email when visible
+- `agents/owner_researcher.py` — phased: Phase 0 BBB (compound A/B: `bbb_direct.lookup` via free search HTTP + ScraperAPI profile, plus `bbb_websearch.lookup` via Claude web_search constrained to bbb.org; compare-mode runs both while `CONFIG.bbb_compare_mode=True`) → Phase 1 `website.lookup` (free crawl + Claude) → Phase 2 `websearch.lookup` (Claude web_search across Houzz/Google/review responses, BBB excluded). Optional pre-phase `yelp_profile.lookup` behind `CONFIG.yelp_phase0_enabled` (off by default). Website phase captures owner email when visible.
 - `agents/website_crawler.py` — pure HTTP+BeautifulSoup, no LLM
 - `agents/csv_assembler.py` — FindyMail upload CSV (4 cols) + master CSV (everything)
 - `state.py`, `tools.py`, `config.py`, `run.py`

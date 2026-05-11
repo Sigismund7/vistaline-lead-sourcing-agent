@@ -40,6 +40,7 @@ MASTER_EXTRA_COLUMNS = [
     "bbb_direct_name", "bbb_direct_url",
     "bbb_websearch_name", "bbb_websearch_url",
     "bbb_conflict",
+    "needs_review",
 ]
 MASTER_COLUMNS = COLUMNS + MASTER_EXTRA_COLUMNS
 
@@ -79,6 +80,7 @@ def run(state: CampaignState) -> tuple[str, str]:
             row["bbb_websearch_name"] = lead.bbb_websearch_name
             row["bbb_websearch_url"] = lead.bbb_websearch_url
             row["bbb_conflict"] = lead.bbb_conflict
+            row["needs_review"] = lead.needs_review
         return row
 
     # FindyMail-ready CSV — kept leads with a confirmed owner first + last name

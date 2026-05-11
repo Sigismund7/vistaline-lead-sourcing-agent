@@ -252,6 +252,11 @@ def run(state: CampaignState, anthropic_key: str) -> None:
                 lead.owner_full_name = full
                 lead.owner_first, lead.owner_last = split_name(full)
                 lead.owner_source = result.get("phase", "")
+                # Propagate the partial-name review flag so the analyst can
+                # filter on it before FindyMail upload. Phases set this when
+                # they shipped a truncated name they couldn't confidently expand.
+                if result.get("needs_review"):
+                    lead.needs_review = True
                 phase_counts[lead.owner_source] = phase_counts.get(lead.owner_source, 0) + 1
                 email = (result.get("owner_email") or "").strip().lower()
                 if email and result.get("phase") == "website":

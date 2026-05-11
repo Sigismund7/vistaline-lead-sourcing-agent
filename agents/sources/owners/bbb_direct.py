@@ -81,20 +81,29 @@ _CAMELCASE_SPLIT_RE = re.compile(r"([a-z])([A-Z])")
 # `time.sleep` happens after release so we never block other threads on
 # IO-bound waits.
 _search_pace_lock = threading.Lock()
-_search_last_call: float = 0.0  # monotonic seconds
+_search_next_slot: float = 0.0  # monotonic seconds — next allowed call time
 
 
 def _pace_search() -> None:
-    """Throttle BBB search calls to ~1 qps with 200ms jitter.
+    """Throttle BBB search calls to ~1 qps with 200ms jitter, globally.
 
-    Thread-safe across owner_researcher workers via a module-level lock.
+    Slot-reservation pattern: each thread atomically claims a future
+    timestamp slot under the lock, then sleeps outside the lock until
+    that slot arrives. Subsequent threads claim the next slot 1 second
+    later, even if the previous thread hasn't woken yet.
+
+    The naive last-call-timestamp pattern (sleep based on time since
+    last call) breaks under contention: if Thread A claims a slot and
+    sleeps, Thread B arrives and sees A's claim-time as "1 second ago"
+    and immediately fires, producing a 2-qps burst. The slot reservation
+    serializes claims correctly.
     """
-    global _search_last_call
+    global _search_next_slot
     with _search_pace_lock:
         now = time.monotonic()
-        elapsed = now - _search_last_call
-        wait = max(0.0, 1.0 - elapsed)
-        _search_last_call = now + wait
+        slot = max(now, _search_next_slot)
+        _search_next_slot = slot + 1.0
+    wait = slot - time.monotonic()
     if wait > 0:
         time.sleep(wait + random.random() * 0.2)
 

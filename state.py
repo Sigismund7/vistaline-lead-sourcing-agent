@@ -44,6 +44,14 @@ class Lead:
     email: str = ""
     filter_done: bool = False   # set True after lead_filter processes this lead
     yelp_id: str = ""
+    # BBB compare-mode fields. Populated by bbb_direct (BBB.org canonical match)
+    # and bbb_websearch (Claude web_search fallback). bbb_conflict is set when
+    # the two phases return different non-empty names.
+    bbb_direct_name: str = ""
+    bbb_direct_url: str = ""
+    bbb_websearch_name: str = ""
+    bbb_websearch_url: str = ""
+    bbb_conflict: bool = False
     # Personalization (post-FindyMail). Empty string means "not run yet".
     x_project: str = ""
     y_detail: str = ""
@@ -126,6 +134,11 @@ class CampaignState:
                 "email": l.email,
                 "filter_done": l.filter_done,
                 "yelp_id": l.yelp_id,
+                "bbb_direct_name": l.bbb_direct_name,
+                "bbb_direct_url": l.bbb_direct_url,
+                "bbb_websearch_name": l.bbb_websearch_name,
+                "bbb_websearch_url": l.bbb_websearch_url,
+                "bbb_conflict": l.bbb_conflict,
                 "x_project": l.x_project,
                 "y_detail": l.y_detail,
                 "y_source": l.y_source,
@@ -168,6 +181,11 @@ class CampaignState:
                 email=r["email"],
                 filter_done=r.get("filter_done", True),
                 yelp_id=r.get("yelp_id", "") or "",
+                bbb_direct_name=r.get("bbb_direct_name", "") or "",
+                bbb_direct_url=r.get("bbb_direct_url", "") or "",
+                bbb_websearch_name=r.get("bbb_websearch_name", "") or "",
+                bbb_websearch_url=r.get("bbb_websearch_url", "") or "",
+                bbb_conflict=r.get("bbb_conflict", False),
                 x_project=r.get("x_project", "") or "",
                 y_detail=r.get("y_detail", "") or "",
                 y_source=r.get("y_source", "") or "",

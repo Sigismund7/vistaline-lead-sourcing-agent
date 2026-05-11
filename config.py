@@ -99,6 +99,19 @@ class Config:
     personalizer_vision_model: str = "claude-sonnet-4-20250514"
     personalizer_screenshot_timeout_s: int = 25
 
+    # ---- BBB Phase 0 ----
+    # Compare mode: run both bbb_direct (HTTP+ScraperAPI scrape) and
+    # bbb_websearch (Claude web_search constrained to bbb.org) on every kept
+    # lead so we can A/B their hit rates side-by-side. Flip to False once we
+    # pick a winner and prune the other module.
+    bbb_compare_mode: bool = True
+    bbb_direct_enabled: bool = True
+    bbb_websearch_enabled: bool = True
+    # Optional pre-phase. Off by default; flip on for segments where Yelp
+    # listings are reliably claimed (the labeled Business Owner field is
+    # only populated on claimed pages).
+    yelp_phase0_enabled: bool = False
+
 
 CONFIG = Config(
     anthropic_key=_require("ANTHROPIC_API_KEY"),
